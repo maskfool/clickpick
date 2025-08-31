@@ -2,6 +2,8 @@
 
 ClickPick is a cutting-edge SaaS platform that uses artificial intelligence to generate stunning, click-worthy YouTube thumbnails. Built with modern technologies and designed for content creators who want professional results without the complexity.
 
+URL - [https://clickpick-chai.vercel.app/]
+
 ## 🚀 Features
 
 - **AI-Powered Generation**: Create thumbnails with advanced AI that understands your content
