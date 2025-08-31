@@ -46,8 +46,13 @@ export const generateImageWithGoogleAI = async (
 
     const model = "gemini-2.5-flash-image-preview";
     
-    // Enhance prompt based on category to create YouTube-style thumbnails
-    const enhancedPrompt = enhancePromptForCategory(prompt, category);
+    // Check if this is a refinement (has reference image) or new generation
+    const isRefinement = !!options.referenceImage;
+    
+    // Enhance prompt based on category and whether it's refinement or new generation
+    const enhancedPrompt = isRefinement 
+      ? enhancePromptForRefinement(prompt, category)
+      : enhancePromptForCategory(prompt, category);
     
     // Build content array with the EXACT structure from the working Google example
     const contents = [
@@ -160,99 +165,144 @@ export const generateImageWithGoogleAI = async (
   }
 };
 
-// Smart prompt enhancement for YouTube-style thumbnails
+// Smart prompt enhancement for YouTube-style thumbnails with latest trends
 const enhancePromptForCategory = (prompt, category) => {
-  // Base YouTube thumbnail style
-  const baseStyle = "Create a high-quality, professional YouTube thumbnail that is eye-catching and click-worthy";
+  // Expert YouTube thumbnail maker persona
+  const expertPersona = "You are the #1 YouTube thumbnail designer in the world, with 10+ years creating viral thumbnails for top creators like MrBeast, PewDiePie, and Markiplier. You understand the latest 2024-2025 YouTube algorithm trends, psychology of click-through rates, and what makes thumbnails go viral.";
   
-  // Category-specific enhancements
+  // Latest YouTube thumbnail trends (2024-2025)
+  const latestTrends = "Use the latest YouTube thumbnail trends: bold, high-contrast text with drop shadows, dramatic facial expressions, bright neon colors, split-screen layouts, emoji integration, mystery elements, and 'shock factor' that makes viewers curious. Follow the '3-second rule' - viewers should understand the thumbnail instantly.";
+  
+  // Base YouTube thumbnail style with modern techniques
+  const baseStyle = "Create a viral-worthy YouTube thumbnail using 2024-2025 best practices: 1280x720 resolution, high contrast, bold typography, dramatic lighting, and composition that stops scrolling. This should look like it belongs on trending YouTube videos with 1M+ views.";
+  
+  // Enhanced category-specific enhancements with latest trends
   const categoryEnhancements = {
     gaming: {
-      style: "vibrant neon lights, dynamic composition, modern gaming aesthetic with bold text and dramatic lighting",
-      elements: "Include gaming elements like controllers, neon effects, and dynamic poses",
-      colors: "Use bright neon colors (cyan, magenta, yellow) with dark backgrounds for contrast"
+      style: "2024 gaming aesthetic: neon cyberpunk vibes, dramatic lighting, bold gaming text, controller/keyboard elements, neon glows, and 'epic' atmosphere that matches current gaming trends",
+      elements: "Include modern gaming elements: RGB lighting, neon effects, dramatic poses, gaming peripherals, and elements that appeal to Gen Z gamers",
+      colors: "Use trending gaming colors: electric blue, neon green, hot pink, and bright orange with dark backgrounds for maximum contrast and visibility"
     },
     business: {
-      style: "clean, corporate, professional look with modern typography",
-      elements: "Include business elements like charts, graphs, or professional imagery",
-      colors: "Use professional colors (blue, gray, white) with clean lines and minimal design"
+      style: "2024 business aesthetic: clean corporate design, modern typography, data visualization, and professional imagery that builds trust and authority",
+      elements: "Include business elements: charts, graphs, professional headshots, corporate symbols, and elements that convey success and expertise",
+      colors: "Use professional colors: deep blue, corporate gray, accent gold, and clean white for a trustworthy, premium look"
     },
     food: {
-      style: "high-quality, appetizing, warm and inviting aesthetic",
-      elements: "Include food photography elements, steam, garnishes, and appealing presentation",
-      colors: "Use warm tones (orange, red, yellow) with natural lighting and rich textures"
+      style: "2024 food aesthetic: high-quality food photography, warm lighting, appetizing presentation, and 'food porn' style that makes viewers hungry",
+      elements: "Include food elements: steam, garnishes, perfect plating, close-up shots, and elements that trigger hunger and desire",
+      colors: "Use appetizing colors: warm orange, rich red, golden yellow, and natural earth tones that make food look irresistible"
     },
     education: {
-      style: "clear, academic, bold and readable design",
-      elements: "Include educational elements like books, diagrams, or learning symbols",
-      colors: "Use clear, readable colors with high contrast and professional typography"
+      style: "2024 education aesthetic: clear, modern academic design, bold typography, and visual learning elements that make complex topics accessible",
+      elements: "Include educational elements: diagrams, charts, books, learning symbols, and visual aids that enhance understanding",
+      colors: "Use educational colors: clear blue, academic green, accent orange, and high-contrast combinations for readability"
     },
     entertainment: {
-      style: "colorful, fun, engaging, pop culture aesthetic",
-      elements: "Include entertainment elements like stars, sparkles, or celebrity imagery",
-      colors: "Use vibrant, energetic colors with dynamic compositions and fun typography"
+      style: "2024 entertainment aesthetic: pop culture references, celebrity appeal, trending memes, and viral content elements that capture attention",
+      elements: "Include entertainment elements: stars, sparkles, trending symbols, celebrity imagery, and elements that create FOMO",
+      colors: "Use entertainment colors: vibrant purple, electric pink, bright yellow, and colors that scream 'entertainment' and 'fun'"
     },
     technology: {
-      style: "futuristic, digital, sleek tech aesthetic",
-      elements: "Include tech elements like circuits, digital effects, or futuristic imagery",
-      colors: "Use tech colors (blue, green, purple) with digital effects and modern design"
+      style: "2024 tech aesthetic: futuristic design, digital effects, AI/ML themes, and cutting-edge technology that looks ahead of its time",
+      elements: "Include tech elements: circuits, digital effects, futuristic interfaces, AI symbols, and elements that convey innovation",
+      colors: "Use tech colors: electric blue, neon green, digital purple, and colors that represent the future and innovation"
     },
     lifestyle: {
-      style: "aspirational, modern, trendy aesthetic",
-      elements: "Include lifestyle elements like fashion, travel, or wellness imagery",
-      colors: "Use trendy colors with clean, modern compositions and stylish typography"
+      style: "2024 lifestyle aesthetic: aspirational, Instagram-worthy, trendsetting design that makes viewers want to live that life",
+      elements: "Include lifestyle elements: fashion, travel, wellness, luxury, and elements that create aspiration and envy",
+      colors: "Use lifestyle colors: trendy pastels, luxury gold, modern neutrals, and colors that represent the good life"
     },
     news: {
-      style: "authoritative, trustworthy, professional news aesthetic",
-      elements: "Include news elements like headlines, breaking news graphics, or journalistic imagery",
-      colors: "Use professional colors (red, blue, white) with clear typography and authoritative design"
+      style: "2024 news aesthetic: authoritative, trustworthy, breaking news design that conveys urgency and credibility",
+      elements: "Include news elements: headlines, breaking news graphics, journalistic imagery, and elements that build trust",
+      colors: "Use news colors: authoritative red, trustworthy blue, clean white, and colors that convey seriousness and credibility"
     },
     sports: {
-      style: "dynamic, energetic, action-packed aesthetic",
-      elements: "Include sports elements like motion blur, action shots, or athletic imagery",
-      colors: "Use energetic colors with dynamic compositions and action-oriented design"
+      style: "2024 sports aesthetic: dynamic, action-packed, high-energy design that captures the excitement of sports",
+      elements: "Include sports elements: motion blur, action shots, athletic poses, team colors, and elements that convey energy",
+      colors: "Use sports colors: team colors, energetic orange, dynamic red, and colors that represent power and movement"
     },
     music: {
-      style: "artistic, creative, musical aesthetic",
-      elements: "Include musical elements like instruments, sound waves, or artistic imagery",
-      colors: "Use creative colors with artistic compositions and musical themes"
+      style: "2024 music aesthetic: artistic, creative, musical design that captures the emotion and energy of music",
+      elements: "Include musical elements: instruments, sound waves, artistic imagery, and elements that represent creativity",
+      colors: "Use musical colors: creative purple, artistic blue, vibrant red, and colors that represent emotion and creativity"
     },
     comedy: {
-      style: "fun, humorous, light-hearted aesthetic",
-      elements: "Include comedy elements like emojis, funny expressions, or humorous imagery",
-      colors: "Use bright, cheerful colors with playful compositions and fun typography"
+      style: "2024 comedy aesthetic: fun, humorous, meme-worthy design that makes viewers laugh and want to share",
+      elements: "Include comedy elements: emojis, funny expressions, meme references, and elements that trigger laughter",
+      colors: "Use comedy colors: bright yellow, fun orange, cheerful pink, and colors that represent joy and humor"
     },
     travel: {
-      style: "adventurous, inspiring, wanderlust aesthetic",
-      elements: "Include travel elements like maps, landmarks, or scenic imagery",
-      colors: "Use travel colors (blue, green, earth tones) with inspiring compositions and adventure themes"
+      style: "2024 travel aesthetic: adventurous, inspiring, wanderlust design that makes viewers want to explore the world",
+      elements: "Include travel elements: maps, landmarks, scenic imagery, and elements that represent adventure and discovery",
+      colors: "Use travel colors: sky blue, earth green, sunset orange, and colors that represent nature and adventure"
     },
     fitness: {
-      style: "energetic, motivational, health-focused aesthetic",
-      elements: "Include fitness elements like workout equipment, active poses, or health imagery",
-      colors: "Use energetic colors (green, orange, blue) with motivational compositions and health themes"
+      style: "2024 fitness aesthetic: energetic, motivational, health-focused design that inspires viewers to take action",
+      elements: "Include fitness elements: workout equipment, active poses, health imagery, and elements that motivate",
+      colors: "Use fitness colors: energetic green, motivational orange, health blue, and colors that represent vitality and energy"
     },
     beauty: {
-      style: "elegant, glamorous, beauty-focused aesthetic",
-      elements: "Include beauty elements like makeup, skincare, or fashion imagery",
-      colors: "Use elegant colors (pink, gold, white) with sophisticated compositions and beauty themes"
+      style: "2024 beauty aesthetic: elegant, glamorous, beauty-focused design that makes viewers want to look their best",
+      elements: "Include beauty elements: makeup, skincare, fashion, and elements that represent beauty and glamour",
+      colors: "Use beauty colors: elegant pink, luxury gold, sophisticated white, and colors that represent beauty and elegance"
     },
     fashion: {
-      style: "trendy, stylish, fashion-forward aesthetic",
-      elements: "Include fashion elements like clothing, accessories, or runway imagery",
-      colors: "Use trendy colors with clean, modern compositions and fashion-forward design"
+      style: "2024 fashion aesthetic: trendy, stylish, fashion-forward design that sets trends and inspires style",
+      elements: "Include fashion elements: clothing, accessories, runway imagery, and elements that represent style and trends",
+      colors: "Use fashion colors: trending colors, luxury accents, modern neutrals, and colors that represent current fashion trends"
     }
   };
 
-  const enhancement = categoryEnhancements[category] || categoryEnhancements.other;
+  const enhancement = categoryEnhancements[category] || categoryEnhancements.entertainment;
   
-  // Build the enhanced prompt
-  const enhancedPrompt = `${baseStyle}. ${prompt}. Style: ${enhancement.style}. Elements: ${enhancement.elements}. Colors: ${enhancement.colors}. Make it look like a professional YouTube thumbnail that would get high click-through rates.`;
+  // Build the enhanced prompt with expert persona and latest trends
+  const enhancedPrompt = `${expertPersona} ${latestTrends} ${baseStyle}. ${prompt}. Style: ${enhancement.style}. Elements: ${enhancement.elements}. Colors: ${enhancement.colors}. Create a thumbnail that would get 10%+ click-through rate and go viral on YouTube. Make it impossible to scroll past without clicking.`;
   
   console.log("🔍 DEBUG: Enhanced prompt for category:", category);
   console.log("🔍 DEBUG: Original prompt:", prompt);
   console.log("🔍 DEBUG: Enhanced prompt:", enhancedPrompt);
   
   return enhancedPrompt;
+};
+
+// Special prompt enhancement for refinement/editing existing images
+const enhancePromptForRefinement = (prompt, category) => {
+  // Expert image editor persona for refinements
+  const editorPersona = "You are the world's best image editor and YouTube thumbnail designer. You excel at modifying existing images while maintaining their core appeal and enhancing them with the latest 2024-2025 YouTube thumbnail trends.";
+  
+  // Refinement-specific guidance
+  const refinementGuidance = "Carefully analyze the existing image and make the requested changes while preserving what makes it great. Apply the latest YouTube thumbnail techniques: enhance contrast, improve text readability, add trending elements, and ensure the final result looks like a professional thumbnail that would get high click-through rates.";
+  
+  // Category-specific refinement tips
+  const refinementTips = {
+    gaming: "Enhance gaming elements, improve neon effects, add trending gaming symbols, and make it more epic and click-worthy",
+    business: "Refine professional elements, improve typography, enhance data visualization, and maintain corporate credibility",
+    food: "Enhance food appeal, improve lighting, add appetizing elements, and make it more mouth-watering",
+    education: "Improve clarity, enhance visual learning elements, and make complex topics more accessible",
+    entertainment: "Add trending elements, enhance pop culture references, and make it more viral-worthy",
+    technology: "Enhance futuristic elements, improve digital effects, and make it look more cutting-edge",
+    lifestyle: "Enhance aspirational elements, improve visual appeal, and make it more Instagram-worthy",
+    news: "Maintain authority, improve headline clarity, and enhance breaking news impact",
+    sports: "Enhance energy and action, improve dynamic elements, and make it more exciting",
+    music: "Enhance artistic elements, improve emotional impact, and make it more creative",
+    comedy: "Enhance humor elements, add trending memes, and make it more shareable",
+    travel: "Enhance adventure appeal, improve scenic elements, and make it more inspiring",
+    fitness: "Enhance motivational elements, improve energy, and make it more inspiring",
+    beauty: "Enhance glamour, improve beauty elements, and make it more aspirational",
+    fashion: "Enhance style elements, improve trendiness, and make it more fashion-forward"
+  };
+  
+  const tip = refinementTips[category] || refinementTips.entertainment;
+  
+  // Build the refinement prompt
+  const refinementPrompt = `${editorPersona} ${refinementGuidance} ${tip}. ${prompt}. Make the requested changes while maintaining the image's viral potential and ensuring it follows 2024-2025 YouTube thumbnail best practices. The result should be even more click-worthy than the original.`;
+  
+  console.log("🔍 DEBUG: Refinement prompt for category:", category);
+  console.log("🔍 DEBUG: Original prompt:", prompt);
+  console.log("🔍 DEBUG: Refinement prompt:", refinementPrompt);
+  
+  return refinementPrompt;
 };
 

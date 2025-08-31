@@ -100,7 +100,7 @@ export const ChatArea = ({ onPromptRefinement, onRefineRequest, currentPrompt }:
           <div className="w-8 h-8 bg-gradient-accent rounded-lg flex items-center justify-center">
             <MessageCircle className="w-4 h-4 text-accent-foreground" />
           </div>
-          AI Chat Assistant
+          AI Chat Image Editor
           <Badge className="bg-gradient-primary text-primary-foreground text-xs">
             Live
           </Badge>

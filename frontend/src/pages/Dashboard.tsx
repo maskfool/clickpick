@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAuthStore } from "../stores/authStore";
 import {
   Sparkles,
@@ -35,7 +35,17 @@ const Dashboard = () => {
   const [refinementCount, setRefinementCount] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedRatio, setSelectedRatio] = useState<'video' | 'shorts' | null>(null);
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null); // Store base64 image data
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load latest image from localStorage on component mount
+  useEffect(() => {
+    const savedImage = localStorage.getItem('clickpick-latest-image');
+    if (savedImage) {
+      setImageDataUrl(savedImage);
+    }
+  }, []);
 
   // ✅ Upload image
   const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -93,6 +103,28 @@ const Dashboard = () => {
         setGeneratedThumbnail(thumbnail.imageUrl);
         setThumbnailId(thumbnail._id);
         setRefinementCount(0); // reset counter
+        setSelectedRatio(null); // reset ratio selection
+        
+        // Store image data for download
+        try {
+          // Convert the image URL to base64 and store it
+          const imageResponse = await fetch(thumbnail.imageUrl.startsWith('/') 
+            ? `${window.location.origin}${thumbnail.imageUrl}` 
+            : thumbnail.imageUrl
+          );
+          const imageBlob = await imageResponse.blob();
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64Data = reader.result as string;
+            setImageDataUrl(base64Data);
+            // Also store in localStorage as backup
+            localStorage.setItem('clickpick-latest-image', base64Data);
+          };
+          reader.readAsDataURL(imageBlob);
+        } catch (error) {
+          console.error("Failed to store image data:", error);
+        }
+        
         toast.success("Thumbnail generated!");
       } else {
         toast.error("Generation failed");
@@ -127,6 +159,27 @@ const Dashboard = () => {
         setGeneratedThumbnail(updatedThumb.imageUrl);
         setPrompt(updatedThumb.finalPrompt);
         setRefinementCount((c) => c + 1);
+        
+        // Store updated image data for download
+        try {
+          // Convert the image URL to base64 and store it
+          const imageResponse = await fetch(updatedThumb.imageUrl.startsWith('/') 
+            ? `${window.location.origin}${updatedThumb.imageUrl}` 
+            : updatedThumb.imageUrl
+          );
+          const imageBlob = await imageResponse.blob();
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64Data = reader.result as string;
+            setImageDataUrl(base64Data);
+            // Also store in localStorage as backup
+            localStorage.setItem('clickpick-latest-image', base64Data);
+          };
+          reader.readAsDataURL(imageBlob);
+        } catch (error) {
+          console.error("Failed to store updated image data:", error);
+        }
+        
         toast.success(`Thumbnail refined (${refinementCount + 1}/${MAX_REFINEMENTS})`);
       } else {
         toast.error("Refinement failed");
@@ -141,6 +194,47 @@ const Dashboard = () => {
   const handlePromptRefinement = (refinedPrompt: string) => {
     setPrompt(refinedPrompt);
   };
+
+  // ✅ Download generated thumbnail from localStorage
+  const handleDownload = async () => {
+    let imageData = imageDataUrl;
+    
+    // Fallback to localStorage if state doesn't have the image
+    if (!imageData) {
+      imageData = localStorage.getItem('clickpick-latest-image');
+      if (!imageData) {
+        toast.error("No image to download");
+        return;
+      }
+    }
+
+    try {
+      // Convert base64 data URL to blob
+      const response = await fetch(imageData);
+      const blob = await response.blob();
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `clickpick-thumbnail-${Date.now()}.png`;
+      
+      // Trigger download
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up
+      window.URL.revokeObjectURL(url);
+      
+      toast.success("Image downloaded successfully!");
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error("Failed to download image. Please try again.");
+    }
+  };
+
+
 
   return (
     <div className="min-h-screen bg-gradient-hero relative overflow-hidden text-foreground">
@@ -179,9 +273,9 @@ const Dashboard = () => {
       </header>
 
       {/* Main 3-column Layout */}
-      <div className="relative z-10 max-w-7xl mx-auto px-6 py-6 grid grid-cols-12 gap-6 h-[calc(100vh-80px)]">
+      <div className="relative z-10 max-w-7xl mx-auto px-6 py-6 grid grid-cols-12 gap-6 min-h-0">
         {/* LEFT PANEL */}
-        <div className="col-span-3 space-y-4 overflow-y-auto pr-2">
+        <div className="col-span-3 space-y-4 overflow-y-auto pr-2 h-[calc(100vh-120px)]">
           <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-card">
             <CardContent>
               <VideoCategories
@@ -197,6 +291,47 @@ const Dashboard = () => {
                 <Wand2 className="w-5 h-5 text-yellow-400" />
                 AI Generator
               </CardTitle>
+              {/* Video/Shorts Ratio Selection */}
+              {/* <div className="flex items-center gap-2 mt-3">
+                <Button
+                  variant={selectedRatio === 'video' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    setSelectedRatio('video');
+                    if (prompt.trim()) {
+                      setPrompt(prompt + ' 16:9 ratio');
+                    } else {
+                      setPrompt('16:9 ratio');
+                    }
+                  }}
+                  className={`text-xs px-3 py-1 h-8 ${
+                    selectedRatio === 'video' 
+                      ? 'bg-gradient-primary text-white' 
+                      : 'bg-transparent border-border/50 text-gray-400 hover:border-primary hover:text-primary'
+                  }`}
+                >
+                  Video (16:9)
+                </Button>
+                <Button
+                  variant={selectedRatio === 'shorts' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    setSelectedRatio('shorts');
+                    if (prompt.trim()) {
+                      setPrompt(prompt + ' 9:16 ratio');
+                    } else {
+                      setPrompt('9:16 ratio');
+                    }
+                  }}
+                  className={`text-xs px-3 py-1 h-8 ${
+                    selectedRatio === 'shorts' 
+                      ? 'bg-gradient-primary text-white' 
+                      : 'bg-transparent border-border/50 text-gray-400 hover:border-primary hover:text-primary'
+                  }`}
+                >
+                  Shorts (9:16)
+                </Button>
+              </div> */}
             </CardHeader>
             <CardContent className="space-y-3">
               <Textarea
@@ -227,32 +362,33 @@ const Dashboard = () => {
         </div>
 
         {/* CENTER PANEL */}
-        <div className="col-span-6 flex flex-col space-y-4">
-          <Card className="flex-1 bg-black/50 backdrop-blur-xl border shadow-float flex items-center justify-center relative">
+        <div className="col-span-6 flex flex-col space-y-4 h-[calc(100vh-120px)]">
+          {/* Thumbnail Display - Fixed height */}
+          <Card className="h-[55%] min-h-[350px] bg-black/50 backdrop-blur-xl border shadow-float flex items-center justify-center relative overflow-hidden">
             {generatedThumbnail ? (
-              <div className="relative w-full max-w-2xl">
+              <div className="relative w-full h-full flex items-center justify-center p-4">
                 <img
                   src={generatedThumbnail}
                   alt="Generated"
-                  className="rounded-xl border border-border/30 shadow-card"
+                  className="max-w-full max-h-full object-contain rounded-xl border border-border/30 shadow-card"
                 />
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-card/90 backdrop-blur-md border border-border/50 rounded-full px-3 py-1 shadow-float">
+                {/* <div className="absolute -top-3 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-card/90 backdrop-blur-md border border-border/50 rounded-full px-3 py-1 shadow-float">
                   <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
                     <RotateCcw className="w-3 h-3" />
                   </Button>
-                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-6 w-6 p-0 hover:text-primary transition-colors" 
+                    onClick={handleDownload}
+                    title="Download thumbnail"
+                  >
                     <Download className="w-3 h-3" />
                   </Button>
-                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                    <Heart className="w-3 h-3" />
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                    <Bookmark className="w-3 h-3" />
-                  </Button>
-                </div>
+                </div> */}
               </div>
             ) : (
-              <div className="text-center space-y-4">
+              <div className="text-center space-y-4 p-8">
                 <div className="relative">
                   <div className="w-20 h-20 bg-gradient-primary rounded-full flex items-center justify-center mx-auto shadow-primary">
                     <Sparkles className="w-10 h-10 text-primary-foreground" />
@@ -276,7 +412,8 @@ const Dashboard = () => {
             )}
           </Card>
 
-          <div className="h-[40%]">
+          {/* Chat Area - Flexible height with proper scrolling */}
+          <div className="flex-1 min-h-[250px] h-[40%] overflow-hidden">
             <ChatArea
               onPromptRefinement={handlePromptRefinement}
               onRefineRequest={handleRefineRequest}
@@ -286,7 +423,7 @@ const Dashboard = () => {
         </div>
 
         {/* RIGHT PANEL */}
-        <div className="col-span-3 space-y-4">
+        <div className="col-span-3 space-y-4 h-[calc(100vh-120px)] overflow-y-auto">
           <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-card">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">

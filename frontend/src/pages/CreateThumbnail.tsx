@@ -257,13 +257,90 @@ const CreateThumbnail = () => {
     }
   };
 
-  const handleDownload = () => {
-    if (currentGeneratedImage) {
+  const handleDownload = async () => {
+    if (!currentGeneratedImage) {
+      toast.error("No image to download");
+      return;
+    }
+
+    try {
+      // Convert relative URL to absolute URL if needed
+      let imageUrl = currentGeneratedImage;
+      if (imageUrl.startsWith('/')) {
+        // If it's a relative path, make it absolute
+        imageUrl = `${window.location.origin}${imageUrl}`;
+      }
+
+      // Fetch the image as a blob
+      const response = await fetch(imageUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = currentGeneratedImage;
+      link.href = url;
       link.download = `clickpick-thumbnail-${Date.now()}.png`;
+      
+      // Trigger download
+      document.body.appendChild(link);
       link.click();
-      toast.success("Download started!");
+      document.body.removeChild(link);
+      
+      // Clean up
+      window.URL.revokeObjectURL(url);
+      
+      toast.success("Image downloaded successfully!");
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error("Failed to download image. Please try again.");
+    }
+  };
+
+  // Function to download any image from chat messages
+  const downloadImage = async (imageUrl: string) => {
+    if (!imageUrl) {
+      toast.error("No image to download");
+      return;
+    }
+
+    try {
+      // Convert relative URL to absolute URL if needed
+      let url = imageUrl;
+      if (url.startsWith('/')) {
+        // If it's a relative path, make it absolute
+        url = `${window.location.origin}${url}`;
+      }
+
+      // Fetch the image as a blob
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+      
+      // Create download link
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `clickpick-image-${Date.now()}.png`;
+      
+      // Trigger download
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up
+      window.URL.revokeObjectURL(downloadUrl);
+      
+      toast.success("Image downloaded successfully!");
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error("Failed to download image. Please try again.");
     }
   };
 
@@ -472,12 +549,22 @@ const CreateThumbnail = () => {
                       }`}
                     >
                       {msg.imageUrl && (
-                        <div className="mb-2">
+                        <div className="mb-2 relative group">
                           <img
                             src={msg.imageUrl}
                             alt="Generated"
                             className="w-full rounded-lg border"
                           />
+                          {/* Download button overlay */}
+                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => msg.imageUrl && downloadImage(msg.imageUrl)}
+                              className="bg-black/70 hover:bg-black/90 text-white p-2 rounded-full shadow-lg transition-all"
+                              title="Download image"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       )}
                       <div

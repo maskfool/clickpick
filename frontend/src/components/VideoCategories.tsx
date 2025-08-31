@@ -92,7 +92,7 @@ export const VideoCategories = ({ onCategorySelect, selectedCategory }: VideoCat
         <Button
           variant="outline"
           size="sm"
-          className="w-full text-xs border-border/50 hover:border-primary/50 text-white"
+          className="w-full text-xs border-border/50 hover:border-primary/50 text-black"
           onClick={() =>
             onCategorySelect({
               id: "",
