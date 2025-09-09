@@ -60,13 +60,14 @@ export const authAPI = {
 
 // ======================= Thumbnails API =======================
 export const thumbnailsAPI = {
-  // ✅ Create new thumbnail (with optional referenceImage)
+  // ✅ Create new thumbnail (with optional referenceImage and referenceImages)
   create: (data: {
     title: string;
     description?: string;
     category: string;
     originalPrompt: string;
     referenceImage?: string;
+    referenceImages?: string[];
   }) => api.post("/thumbnails", data),
 
   // ✅ Refine thumbnail with optional referenceImage and chatHistory
@@ -97,6 +98,18 @@ export const thumbnailsAPI = {
     formData.append("image", file);
     console.log("🔍 DEBUG: Frontend sending file:", file.name, "field: image");
     return api.post("/thumbnails/upload-reference", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
+
+  // ✅ Upload multiple reference images (multipart)
+  uploadMultipleReferences: (files: File[]) => {
+    const formData = new FormData();
+    files.forEach((file, index) => {
+      formData.append("images", file);
+    });
+    console.log("🔍 DEBUG: Frontend sending files:", files.map(f => f.name), "field: images");
+    return api.post("/thumbnails/upload-multiple-references", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },

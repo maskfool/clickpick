@@ -3,7 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { MessageCircle, Send, Bot, User, RefreshCw } from "lucide-react";
+import { MessageCircle, Send, Bot, User, RefreshCw, Wand2 } from "lucide-react";
+import { GenerationCounter } from "./GenerationCounter";
 
 interface Message {
   id: string;
@@ -16,9 +17,12 @@ interface ChatAreaProps {
   onPromptRefinement: (refinedPrompt: string) => void;
   onRefineRequest: (userPrompt: string) => Promise<void>; // ✅ new callback
   currentPrompt: string;
+  generationCount?: number;
+  maxGenerationCount?: number;
+  onUpgrade?: () => void;
 }
 
-export const ChatArea = ({ onPromptRefinement, onRefineRequest, currentPrompt }: ChatAreaProps) => {
+export const ChatArea = ({ onPromptRefinement, onRefineRequest, currentPrompt, generationCount = 0, maxGenerationCount = 5, onUpgrade }: ChatAreaProps) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
@@ -94,8 +98,8 @@ export const ChatArea = ({ onPromptRefinement, onRefineRequest, currentPrompt }:
   ];
 
   return (
-    <Card className="h-full bg-black/50 backdrop-blur-xl border shadow-card flex flex-col">
-      <CardHeader className="pb-3">
+    <Card className="h-full bg-card/80 backdrop-blur-xl border-border/50 shadow-card flex flex-col">
+      <CardHeader className="pb-3 border-b border-border/50">
         <CardTitle className="text-lg flex items-center gap-3">
           <div className="w-8 h-8 bg-gradient-accent rounded-lg flex items-center justify-center">
             <MessageCircle className="w-4 h-4 text-accent-foreground" />
@@ -106,6 +110,15 @@ export const ChatArea = ({ onPromptRefinement, onRefineRequest, currentPrompt }:
           </Badge>
         </CardTitle>
       </CardHeader>
+
+      {/* Generation Counter */}
+      <div className="p-4 border-b border-border/30">
+        <GenerationCounter 
+          currentCount={generationCount}
+          maxCount={maxGenerationCount}
+          onUpgrade={onUpgrade}
+        />
+      </div>
 
       <CardContent className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto space-y-3 pr-2">
@@ -169,9 +182,22 @@ export const ChatArea = ({ onPromptRefinement, onRefineRequest, currentPrompt }:
             onChange={(e) => setInputText(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Ask for refinements..."
-            className="flex-1 bg-input/80 backdrop-blur-sm border-border/50 text-sm"
+            className="flex-1 bg-input/80 backdrop-blur-sm border-border/50 text-white placeholder:text-gray-400 text-sm"
             disabled={isProcessing}
           />
+          <Button
+            onClick={() => {
+              const refinedPrompt = `${currentPrompt} with ${inputText.toLowerCase()}`;
+              onPromptRefinement(refinedPrompt);
+              setInputText("");
+            }}
+            variant="outline"
+            size="sm"
+            disabled={!inputText.trim() || isProcessing}
+            title="Refine Prompt"
+          >
+            <Wand2 className="w-4 h-4" />
+          </Button>
           <Button
             onClick={handleSendMessage}
             disabled={!inputText.trim() || isProcessing}

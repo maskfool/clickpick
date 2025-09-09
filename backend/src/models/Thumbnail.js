@@ -19,8 +19,9 @@ const thumbnailSchema = new mongoose.Schema(
     finalPrompt: { type: String, required: true, trim: true },
     imageUrl: { type: String, required: true },
 
-    // ✅ store uploaded ref image
-    referenceImage: { type: String },
+    // ✅ store uploaded ref image(s)
+    referenceImage: { type: String }, // Single image for backward compatibility
+    referenceImages: [{ type: String }], // Multiple images support
 
     variants: [{ url: String, mimeType: String, ext: String }],
     metadata: {

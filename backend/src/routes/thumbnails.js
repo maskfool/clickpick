@@ -77,6 +77,45 @@ router.post(
   }
 );
 
+// ======================= Upload Multiple Reference Images =======================
+router.post(
+  "/upload-multiple-references",
+  protect,
+  upload.array("images", 5), // Max 5 images
+  async (req, res) => {
+    try {
+      console.log("🔍 DEBUG: Multiple upload endpoint called");
+      console.log("🔍 DEBUG: req.files:", req.files);
+      console.log("🔍 DEBUG: req.body:", req.body);
+      
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ error: "No files uploaded" });
+      }
+
+      const uploadedImages = req.files.map(file => {
+        const relativePath = `/uploads/${file.filename}`;
+        const absoluteUrl = buildAbsoluteUrl(req, relativePath);
+        return { imageUrl: absoluteUrl, relativePath };
+      });
+      
+      console.log("🔍 DEBUG: Generated uploadedImages:", uploadedImages);
+
+      res.status(200).json({
+        success: true,
+        message: `${req.files.length} reference images uploaded successfully`,
+        data: { images: uploadedImages },
+      });
+    } catch (error) {
+      console.error("Multiple upload error:", error.message);
+      res.status(500).json({
+        success: false,
+        error: "Failed to upload images",
+        details: error.message,
+      });
+    }
+  }
+);
+
 // ======================= Create Thumbnail =======================
 router.post(
   "/",
@@ -101,10 +140,11 @@ router.post(
         });
       }
 
-      const { title, description, category, originalPrompt, referenceImage } = req.body;
+      const { title, description, category, originalPrompt, referenceImage, referenceImages } = req.body;
       
       console.log("🔍 DEBUG: Backend received request:");
       console.log("🔍 DEBUG: referenceImage:", referenceImage);
+      console.log("🔍 DEBUG: referenceImages:", referenceImages);
       console.log("🔍 DEBUG: typeof referenceImage:", typeof referenceImage);
       console.log("🔍 DEBUG: originalPrompt:", originalPrompt);
       
@@ -116,6 +156,7 @@ router.post(
         category,
         originalPrompt,
         referenceImage: referenceImage || null,
+        referenceImages: referenceImages || [],
         status: "generating",
         finalPrompt: originalPrompt,
         imageUrl: "/api/images/placeholder",
@@ -125,6 +166,7 @@ router.post(
       try {
         const imageResult = await generateImageWithGoogleAI(originalPrompt, category, {
           referenceImage,
+          referenceImages,
         });
 
         thumbnail.finalPrompt = originalPrompt;

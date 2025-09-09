@@ -620,7 +620,7 @@ const CreateThumbnail = () => {
                     : "Describe your thumbnail idea..."
                 }
                 disabled={isLoading}
-                className="w-full px-4 py-2 border rounded-lg resize-none focus:ring-2 focus:ring-primary-500"
+                className="w-full px-4 py-2 border rounded-lg resize-none focus:ring-2 focus:ring-primary-500 text-white placeholder:text-gray-400 bg-gray-800/50"
                 rows={2}
               />
               <button
