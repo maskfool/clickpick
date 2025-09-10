@@ -135,15 +135,9 @@ export const ThumbnailPreview = ({
           {previewMode === 'video' && (
             <>
               {/* Video duration badge */}
-              <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded">
-                10:34
-              </div>
+              
               {/* Play button overlay */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center opacity-90">
-                  <div className="w-0 h-0 border-l-[20px] border-l-white border-t-[12px] border-t-transparent border-b-[12px] border-b-transparent ml-1" />
-                </div>
-              </div>
+              
             </>
           )}
 

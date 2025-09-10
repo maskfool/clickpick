@@ -92,24 +92,24 @@ export const thumbnailsAPI = {
   // Like a thumbnail
   like: (id: string) => api.post(`/thumbnails/${id}/like`),
 
-  // ✅ Upload reference image (multipart)
+  // ✅ Upload reference image using UploadThing FileRouter
   uploadReference: (file: File) => {
     const formData = new FormData();
-    formData.append("image", file);
-    console.log("🔍 DEBUG: Frontend sending file:", file.name, "field: image");
-    return api.post("/thumbnails/upload-reference", formData, {
+    formData.append("files", file);
+    console.log("🔍 DEBUG: Frontend sending file:", file.name, "to UploadThing FileRouter");
+    return api.post("/uploadthing/referenceImageUploader", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },
 
-  // ✅ Upload multiple reference images (multipart)
+  // ✅ Upload multiple reference images using UploadThing FileRouter
   uploadMultipleReferences: (files: File[]) => {
     const formData = new FormData();
     files.forEach((file, index) => {
-      formData.append("images", file);
+      formData.append("files", file);
     });
-    console.log("🔍 DEBUG: Frontend sending files:", files.map(f => f.name), "field: images");
-    return api.post("/thumbnails/upload-multiple-references", formData, {
+    console.log("🔍 DEBUG: Frontend sending files:", files.map(f => f.name), "to UploadThing FileRouter");
+    return api.post("/uploadthing/multipleReferenceImagesUploader", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },

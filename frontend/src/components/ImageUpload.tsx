@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { thumbnailsAPI } from "@/services/api";
+import { useUploadThing } from "@/lib/uploadthing";
 
 interface ImageUploadProps {
   onImagesChange: (images: string[]) => void;
@@ -24,12 +24,41 @@ export const ImageUpload = ({
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [imagePaths, setImagePaths] = useState<string[]>([]); // Backend relative paths
   const [textPrompt, setTextPrompt] = useState("");
-  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
+  // Use UploadThing hook for manual control
+  const { startUpload, isUploading: isUploadThingLoading } = useUploadThing("multipleReferenceImagesUploader");
+
+  const handleUploadComplete = (res: any) => {
+    console.log("Files uploaded:", res);
     
+    if (res && res.length > 0) {
+      const newPaths = res.map((img: any) => img.fileName);
+      const newPreviews = res.map((img: any) => `http://localhost:5001${img.imageUrl}`);
+      
+      // Update state
+      setImagePaths(prev => {
+        const updated = [...prev, ...newPaths];
+        onImagePathsChange?.(updated);
+        return updated;
+      });
+      
+      setUploadedImages(prev => {
+        const updated = [...prev, ...newPreviews];
+        onImagesChange(updated);
+        return updated;
+      });
+      
+      toast.success(`${res.length} image(s) uploaded successfully!`);
+    }
+  };
+
+  const handleUploadError = (error: Error) => {
+    console.error("Upload error:", error);
+    toast.error(`Upload failed: ${error.message}`);
+  };
+
+  const handleFileUpload = async (files: File[]) => {
     if (uploadedImages.length + files.length > maxImages) {
       toast.error(`You can only upload up to ${maxImages} images`);
       return;
@@ -37,46 +66,40 @@ export const ImageUpload = ({
 
     // Validate file sizes
     for (const file of files) {
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error("File size must be less than 10MB");
+      if (file.size > 4 * 1024 * 1024) { // 4MB limit
+        toast.error("File size must be less than 4MB");
         return;
       }
     }
 
-    setIsUploading(true);
-    
     try {
-      // Upload files to backend
-      const response = await thumbnailsAPI.uploadMultipleReferences(files);
+      // Use UploadThing's startUpload function
+      const res = await startUpload(files);
       
-      if (response.data?.success) {
-        const uploadedImageData = response.data.data.images;
-        const newPaths = uploadedImageData.map((img: any) => img.relativePath);
-        const newPreviews = uploadedImageData.map((img: any) => img.imageUrl);
-        
-        // Update state
-        setImagePaths(prev => {
-          const updated = [...prev, ...newPaths];
-          onImagePathsChange?.(updated);
-          return updated;
-        });
-        
-        setUploadedImages(prev => {
-          const updated = [...prev, ...newPreviews];
-          onImagesChange(updated);
-          return updated;
-        });
-        
-        toast.success(`${files.length} image(s) uploaded successfully!`);
-      } else {
-        toast.error("Failed to upload images");
+      if (res) {
+        handleUploadComplete(res);
       }
-    } catch (error: any) {
-      console.error("Upload failed:", error);
-      toast.error("Failed to upload images");
-    } finally {
-      setIsUploading(false);
+    } catch (error) {
+      handleUploadError(error as Error);
     }
+  };
+
+  const handleFileInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    await handleFileUpload(files);
+  };
+
+  const handleDragOver = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleDrop = async (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    const files = Array.from(event.dataTransfer.files);
+    await handleFileUpload(files);
   };
 
   const removeImage = (index: number) => {
@@ -102,11 +125,13 @@ export const ImageUpload = ({
     <div className="space-y-4">
       <div
         onClick={() => fileInputRef.current?.click()}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         className="border-2 border-dashed border-border/50 rounded-xl p-8 text-center cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all duration-300 group"
       >
         <div className="flex flex-col items-center gap-3">
           <div className="w-12 h-12 bg-gradient-primary rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-            {isUploading ? (
+            {isUploadThingLoading ? (
               <div className="w-6 h-6 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
             ) : (
               <Upload className="w-6 h-6 text-primary-foreground" />
@@ -114,7 +139,7 @@ export const ImageUpload = ({
           </div>
           <div>
             <p className="text-sm font-medium text-foreground">
-              {isUploading ? "Uploading..." : "Upload Images"}
+              {isUploadThingLoading ? "Uploading..." : "Upload Images"}
             </p>
             <p className="text-xs text-muted-foreground">
               Drop files here or click to browse ({uploadedImages.length}/{maxImages})
@@ -128,7 +153,7 @@ export const ImageUpload = ({
         type="file"
         accept="image/*"
         multiple
-        onChange={handleImageUpload}
+        onChange={handleFileInputChange}
         className="hidden"
       />
 

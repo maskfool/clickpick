@@ -1,122 +1,267 @@
-import OpenAI from 'openai';
+// services/openai.js
+import OpenAI from "openai";
 
-// Initialize OpenAI only if API key is available
+/**
+ * OpenAI initialization
+ * Keep this tolerant: if OPENAI_API_KEY missing, we still return sensible fallbacks.
+ */
 let openai = null;
 try {
   if (process.env.OPENAI_API_KEY) {
     openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     });
+    console.log("✅ OpenAI initialized");
+  } else {
+    console.warn("⚠️ OPENAI_API_KEY not found - AI features will use fallbacks");
   }
-} catch (error) {
-  console.log('OpenAI not configured - AI features will be disabled');
+} catch (err) {
+  console.warn("⚠️ OpenAI init failed:", err.message);
+  openai = null;
 }
 
-// System prompts for different AI tasks
-const SYSTEM_PROMPTS = {
-  'prompt-enhancement': `You are an expert YouTube thumbnail designer and AI prompt engineer. Your job is to enhance user prompts to create better, more detailed prompts for AI image generation.
-
-Key principles:
-1. Make prompts specific and detailed
-2. Include visual elements, colors, composition, and style
-3. Optimize for YouTube thumbnail appeal
-4. Consider the category context
-5. Keep the enhanced prompt under 200 words
-
-Format your response as a clean, enhanced prompt that can be directly used for image generation.`,
-
-  'thumbnail-ideas': `You are a creative YouTube thumbnail strategist. Generate innovative thumbnail ideas that will increase click-through rates.
-
-Consider:
-1. Visual impact and attention-grabbing elements
-2. Emotional triggers and curiosity gaps
-3. Category-specific design trends
-4. Target audience preferences
-5. Current design trends
-
-Provide 5-8 specific thumbnail concepts with brief descriptions.`,
-
-  'edit-suggestions': `You are an expert image editor and AI prompt engineer. Analyze the current image and user goal to provide specific editing suggestions.
-
-Focus on:
-1. Specific visual changes needed
-2. Technical prompt improvements
-3. Style and composition adjustments
-4. Color and lighting modifications
-5. Element positioning and sizing
-
-Provide 3-5 actionable editing suggestions.`,
-
-  'thumbnail-feedback': `You are a YouTube thumbnail optimization expert. Analyze the thumbnail description and provide constructive feedback.
-
-Evaluate:
-1. Visual appeal and click-worthiness
-2. Brand consistency and recognition
-3. Target audience alignment
-4. Technical quality and readability
-5. Competitive positioning
-
-Provide specific, actionable feedback with improvement suggestions.`,
-
-  'prompt-help': `You are an AI prompt engineering expert specializing in image generation. Help users write effective prompts for their specific needs.
-
-Focus on:
-1. Clear, descriptive language
-2. Technical specifications
-3. Style and mood indicators
-4. Composition and layout details
-5. Category-specific elements
-
-Provide step-by-step guidance and example prompts.`,
-
-  'trending-topics': `You are a YouTube trends analyst. Identify current trending topics and themes that would make compelling thumbnails.
-
-Consider:
-1. Current viral content and memes
-2. Seasonal and timely themes
-3. Emerging trends in various categories
-4. Audience engagement patterns
-5. Content creator opportunities
-
-Provide 8-12 trending topics with brief descriptions.`
+// ----------------------- Shared Thumbnail Presets + Builder -----------------------
+const CATEGORY_PRESETS = {
+  gaming: {
+    archetype: "neon cyberpunk gaming",
+    faceSize: "50-60%",
+    faceMood: "intense, focused, triumphant",
+    composition: "face on right third, dynamic action on left with motion blur",
+    elements: "controller, RGB glow, HUD overlays, neon sparks",
+    colors: "electric blue, neon green, hot pink, cyberpunk purple",
+    vibe: "epic, high-energy, 'can't miss' moment",
+  },
+  business: {
+    archetype: "clean corporate premium",
+    faceSize: "40-50%",
+    faceMood: "confident, assured",
+    composition: "face on left third, data viz / upward graph on right",
+    elements: "graph, chart, dollar symbol, polished headshot",
+    colors: "deep blue, gray, accent gold, clean white",
+    vibe: "trustworthy, expert, 'results-driven'",
+  },
+  education: {
+    archetype: "clear modern academic design",
+    faceSize: "40-50%",
+    faceMood: "engaged, confident",
+    composition: "face on one side, diagrams/text on the other",
+    elements: "diagrams, icons, charts, AI visual aids",
+    colors: "clear blue, academic green, accent orange",
+    vibe: "clear, authoritative, helpful",
+  },
+  entertainment: {
+    archetype: "viral pop-culture entertainment",
+    faceSize: "50-60%",
+    faceMood: "dramatic, excited",
+    composition: "face on one side, pop element on the other",
+    elements: "sparkles, stars, trending symbols, celebrity imagery",
+    colors: "vibrant purple, electric pink, neon yellow",
+    vibe: "fun, viral, high-energy",
+  },
+  travel: {
+    archetype: "adventurous travel & wonder",
+    faceSize: "40-50%",
+    faceMood: "excited, amazed",
+    composition: "face on one side, landmark/vehicle on other",
+    elements: "map, landmark, scenic background, suitcase",
+    colors: "sky blue, earth green, sunset orange",
+    vibe: "wanderlust, inspirational",
+  },
+  other: {
+    archetype: "viral-ready generic",
+    faceSize: "45-55%",
+    faceMood: "dramatic",
+    composition: "face on one side, bold element on other",
+    elements: "clear iconography, single focused prop",
+    colors: "bright high-contrast palette",
+    vibe: "attention-grabbing",
+  },
 };
 
-// Function to enhance prompts with AI
-export const enhancePromptWithAI = async (originalPrompt, category, style, tone) => {
+// Negative constraints
+const NEGATIVES = [
+  "no small unreadable text",
+  "no cluttered layout",
+  "avoid washed-out colors or low contrast",
+  "avoid unnatural skin tones",
+  "no watermarks or logos",
+  "avoid busy backgrounds that hide main subject",
+].join(", ");
+
+// Service → logo tokens map (same as googleAI)
+const SERVICE_LOGOS = {
+  aws: ["AWS logo", "Amazon Web Services badge"],
+  amazon: ["Amazon logo", "AWS logo"],
+  google: ["Google logo", "GCP logo", "Google Cloud logo"],
+  gcp: ["GCP logo", "Google Cloud logo"],
+  azure: ["Microsoft Azure logo", "Azure logo"],
+  stripe: ["Stripe logo"],
+  paypal: ["PayPal logo"],
+  upi: ["UPI logo", "UPI apps icons"],
+  paytm: ["Paytm logo"],
+  youtube: ["YouTube logo"],
+  openai: ["OpenAI logo", "ChatGPT icon"],
+  firebase: ["Firebase logo"],
+  mongodb: ["MongoDB leaf logo"],
+  postgres: ["Postgres elephant logo"],
+  vercel: ["Vercel logo"],
+  netlify: ["Netlify logo"],
+  // add more as needed
+};
+
+const cleanText = (txt = "") => String(txt || "").trim().replace(/\s{2,}/g, " ");
+
+// Detect services/brands in prompt + options
+const detectServiceLogos = (basePrompt = "", options = {}) => {
+  const text = `${basePrompt} ${(options.imageStyleHints || "")} ${(options.headlineText || "")}`.toLowerCase();
+  const detected = new Set();
+
+  for (const key of Object.keys(SERVICE_LOGOS)) {
+    if (text.includes(key)) {
+      SERVICE_LOGOS[key].forEach(token => detected.add(token));
+    }
+  }
+
+  if (Array.isArray(options.explicitLogos)) options.explicitLogos.forEach(l => detected.add(l));
+  return Array.from(detected);
+};
+
+// Build thumbnail prompt with logos included when detected
+const buildThumbnailPrompt = ({
+  basePrompt = "",
+  category = "other",
+  facePresent = false,
+  headlineText = "",
+  subText = "",
+  emotion = "",
+  cta = "",
+  imageStyleHints = "",
+  width = 1280,
+  height = 720,
+  options = {}
+}) => {
+  const preset = CATEGORY_PRESETS[category] || CATEGORY_PRESETS.other;
+  const size = `${width}x${height}`;
+
+  const detectedLogos = detectServiceLogos(basePrompt, options);
+  const logosInstruction = detectedLogos.length
+    ? `Include logos/icons: ${detectedLogos.join(", ")}. Place them small but clearly visible near the related prop; ensure logos are legible and not distorted.`
+    : "";
+
+  const FACE_RULE = facePresent
+    ? `IF FACE: Place face LARGE (${preset.faceSize}) occupying the left OR right third. Expression: ${emotion || preset.faceMood}. Dramatic lighting, high contrast, slight vignette.`
+    : "No face: create a bold, high-contrast central focal point with strong shapes and AI-enhanced effects.";
+
+  const TEXT_INSTRUCTIONS = headlineText
+    ? `Primary headline text (big, readable): "${cleanText(headlineText)}" — place as a 2-line max, very bold, with heavy drop shadow and outline for legibility.`
+    : "No primary headline text required.";
+
+  const SUBTEXT_INSTRUCTIONS = subText
+    ? `Secondary text (small): "${cleanText(subText)}" — keep <30% width, high contrast, simple font.`
+    : "";
+
+  const CTA_INSTRUCTION = cta ? `Add a small CTA badge: "${cleanText(cta)}" placed top-left or bottom-right.` : "";
+
+  const composed = [
+    "You are the #1 YouTube thumbnail creator: produce a thumbnail that is 'scroll-stopping' and optimized for maximum CTR on YouTube in 2025.",
+    `Output must be ${size} and ready for immediate upload as a high-impact thumbnail.`,
+    `Style archetype: ${preset.archetype}. Vibe: ${preset.vibe}. Colors: ${preset.colors}. Elements to include: ${preset.elements}. Composition hint: ${preset.composition}.`,
+    FACE_RULE,
+    TEXT_INSTRUCTIONS,
+    SUBTEXT_INSTRUCTIONS,
+    CTA_INSTRUCTION,
+    "Use bold, high-contrast typography with heavy drop shadows and outlines so text is readable even on mobile thumbnails. Use dramatic lighting and AI-enhanced effects (glows, particle sparks, subtle chromatic aberration) to increase perceived quality.",
+    "Integrate a 'mystery' or 'shock' element that creates curiosity but doesn't mislead. Follow the 3-second rule — the thumbnail must communicate at a glance.",
+    logosInstruction,
+    `Constraints: ${NEGATIVES}.`,
+    basePrompt ? `User instruction: ${basePrompt}.` : "",
+    imageStyleHints ? `Image hints: ${imageStyleHints}.` : "",
+    "Create 3 strong variants (different color accents, text sizes, and facial crops) and prioritize readability for mobile.",
+  ].filter(Boolean).join(" ");
+
+  return composed;
+};
+
+// ----------------------- System Prompts -----------------------
+const SYSTEM_PROMPTS = {
+  "prompt-enhancement": `You are an expert YouTube thumbnail designer and AI prompt engineer. Enhance user prompts into compact, specific instructions that image generation models can execute. Keep enhanced prompt under ~200 words while retaining composition, face rules, colors, text, and logos when present.`,
+
+  "thumbnail-ideas": `You are a creative YouTube thumbnail strategist. Generate bold, A/B-testable thumbnail concepts for the given topic and category.`,
+
+  "edit-suggestions": `You are an expert image editor. Provide 3-5 actionable editing suggestions to improve readability, composition, color, and emotional impact.`,
+
+  "thumbnail-feedback": `You are a YouTube thumbnail optimization expert. Give concise feedback focusing on visual hierarchy, readability, emotional pull, and A/B test ideas.`,
+
+  "prompt-help": `You are an AI prompt engineering teacher. Help users format clear prompts for image generation by breaking down required tokens and showing an example final prompt.`,
+
+  "trending-topics": `You are a YouTube trends analyst. Provide trending topics with short hooks tuned to high CTR thumbnails.`,
+};
+
+// ----------------------- Public API functions -----------------------
+
+export const enhancePromptWithAI = async (originalPrompt, category = "other", style = "professional", tone = "neutral", options = {}) => {
   try {
-    // Check if OpenAI is available
+    const opts = options || {};
+
+    const baselinePrompt = buildThumbnailPrompt({
+      basePrompt: originalPrompt,
+      category,
+      facePresent: Boolean(opts.facePresent),
+      headlineText: opts.headlineText || "",
+      subText: opts.subText || "",
+      emotion: opts.emotion || "",
+      cta: opts.cta || "",
+      imageStyleHints: opts.imageStyleHints || "",
+      width: opts.width || 1280,
+      height: opts.height || 720,
+      options: opts
+    });
+
     if (!openai) {
-      // Return a basic enhanced prompt without AI
-      return `${originalPrompt}, ${category || 'general'} style, professional YouTube thumbnail, high quality, eye-catching, 1280x720`;
+      return baselinePrompt;
     }
 
-    const systemPrompt = SYSTEM_PROMPTS['prompt-enhancement'];
-    
-    const userPrompt = `Enhance this prompt for AI image generation:
-
-Original Prompt: "${originalPrompt}"
-Category: ${category || 'general'}
-Style: ${style || 'professional'}
-Tone: ${tone || 'neutral'}
-
-Please create an enhanced, detailed prompt that will generate a high-quality YouTube thumbnail image. Focus on visual elements, composition, colors, and style that will make the thumbnail stand out.`;
+    const systemPrompt = SYSTEM_PROMPTS["prompt-enhancement"];
+    const userPrompt = [
+      `Original: "${originalPrompt}"`,
+      `Category: ${category}`,
+      `Style: ${style}`,
+      `Tone: ${tone}`,
+      `Options: ${JSON.stringify(opts)}`,
+      "Produce an enhanced, actionable image generation prompt (<=200 words) based on the baseline below.",
+      `Baseline: ${baselinePrompt}`,
+    ].join("\n");
 
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4',
+      model: process.env.OPENAI_MODEL || "gpt-4",
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
       ],
-      max_tokens: 300,
+      max_tokens: 400,
       temperature: 0.7,
     });
 
-    return completion.choices[0].message.content.trim();
-  } catch (error) {
-    console.error('OpenAI API error:', error);
-    throw new Error('Failed to enhance prompt with AI');
+    const result = completion.choices?.[0]?.message?.content?.trim();
+    return result || baselinePrompt;
+  } catch (err) {
+    console.error("OpenAI prompt enhancement error:", err);
+    return buildThumbnailPrompt({
+      basePrompt: originalPrompt,
+      category,
+      facePresent: Boolean(options?.facePresent),
+      headlineText: options?.headlineText || "",
+      subText: options?.subText || "",
+      emotion: options?.emotion || "",
+      cta: options?.cta || "",
+      imageStyleHints: options?.imageStyleHints || "",
+      width: options?.width || 1280,
+      height: options?.height || 720,
+      options
+    });
   }
 };
+
 
 // Function to chat with AI for various purposes
 export const chatWithAI = async (taskType, context) => {

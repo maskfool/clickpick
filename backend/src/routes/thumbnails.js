@@ -1,12 +1,11 @@
 import express from "express";
 import { body, validationResult } from "express-validator";
 import multer from "multer";
-import path from "path";
-import fs from "fs";
 import { protect } from "../middleware/auth.js";
 import Thumbnail from "../models/Thumbnail.js";
 
 import { generateImageWithGoogleAI } from "../services/googleAI.js";
+import { uploadToUploadThing, uploadMultipleToUploadThing } from "../services/uploadthing.js";
 
 const router = express.Router();
 
@@ -17,19 +16,8 @@ const buildAbsoluteUrl = (req, relativePath) => {
 };
 
 // ======================= Multer Config =======================
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = path.join(process.cwd(), "uploads");
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `ref-${Date.now()}${ext}`);
-  },
-});
+// Use memory storage since we're uploading to UploadThing
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
@@ -55,16 +43,25 @@ router.post(
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      const relativePath = `/uploads/${req.file.filename}`;
-      const absoluteUrl = buildAbsoluteUrl(req, relativePath);
+      // Upload to UploadThing instead of local storage
+      const filename = `ref-${Date.now()}-${req.file.originalname}`;
+      const uploadResult = await uploadToUploadThing(
+        req.file.buffer,
+        filename,
+        req.file.mimetype
+      );
       
-      console.log("🔍 DEBUG: Generated relativePath:", relativePath);
-      console.log("🔍 DEBUG: Generated absoluteUrl:", absoluteUrl);
+      console.log("🔍 DEBUG: UploadThing result:", uploadResult);
 
       res.status(200).json({
         success: true,
         message: "Reference image uploaded successfully",
-        data: { imageUrl: absoluteUrl, relativePath },
+        data: { 
+          imageUrl: uploadResult.url,
+          relativePath: uploadResult.key,
+          key: uploadResult.key,
+          filename: uploadResult.key
+        },
       });
     } catch (error) {
       console.error("Upload error:", error.message);
@@ -92,13 +89,23 @@ router.post(
         return res.status(400).json({ error: "No files uploaded" });
       }
 
-      const uploadedImages = req.files.map(file => {
-        const relativePath = `/uploads/${file.filename}`;
-        const absoluteUrl = buildAbsoluteUrl(req, relativePath);
-        return { imageUrl: absoluteUrl, relativePath };
-      });
+      // Upload all files to UploadThing
+      const filesToUpload = req.files.map((file, index) => ({
+        buffer: file.buffer,
+        filename: `ref-${Date.now()}-${index}-${file.originalname}`,
+        contentType: file.mimetype
+      }));
+
+      const uploadResults = await uploadMultipleToUploadThing(filesToUpload);
       
-      console.log("🔍 DEBUG: Generated uploadedImages:", uploadedImages);
+      const uploadedImages = uploadResults.map(result => ({
+        imageUrl: result.url,
+        relativePath: result.key,
+        key: result.key,
+        filename: result.filename
+      }));
+      
+      console.log("🔍 DEBUG: UploadThing results:", uploadedImages);
 
       res.status(200).json({
         success: true,

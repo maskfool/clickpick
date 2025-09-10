@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import mime from "mime";
 import fs from "fs/promises";
 import path from "path";
+import { uploadToUploadThing } from "./uploadthing.js";
 
 let ai = null;
 
@@ -83,9 +84,10 @@ export const generateImageWithGoogleAI = async (
     const isRefinement = !!(options.referenceImage || (options.referenceImages && options.referenceImages.length > 0));
     
     // Enhance prompt based on category and whether it's refinement or new generation
+    // Backward-compatible: some callers pass only (prompt, category) so options may be undefined
     const enhancedPrompt = isRefinement 
-      ? enhancePromptForRefinement(prompt, category)
-      : enhancePromptForCategory(prompt, category);
+      ? enhancePromptForRefinement(prompt, category, options)
+      : enhancePromptForCategory(prompt, category, options);
     
     // Build content array with the EXACT structure from the working Google example
     const contents = [
@@ -135,9 +137,6 @@ export const generateImageWithGoogleAI = async (
       contents,
     });
 
-    const uploadPath = process.env.UPLOAD_PATH || "./uploads";
-    await fs.mkdir(uploadPath, { recursive: true });
-
     let variants = [];
     let index = 0;
 
@@ -148,14 +147,31 @@ export const generateImageWithGoogleAI = async (
         const buffer = Buffer.from(part.inlineData.data, "base64");
 
         const filename = `ai-${Date.now()}-${index}.${mime.getExtension(mimeType)}`;
-        const filePath = path.join(uploadPath, filename);
-        await fs.writeFile(filePath, buffer);
-
-        variants.push({
-          url: `/uploads/${filename}`,
-          mimeType,
-          ext: mime.getExtension(mimeType),
-        });
+        
+        try {
+          // Upload to UploadThing instead of local storage
+          const uploadResult = await uploadToUploadThing(buffer, filename, mimeType);
+          
+          variants.push({
+            url: uploadResult.url,
+            key: uploadResult.key,
+            mimeType,
+            ext: mime.getExtension(mimeType),
+          });
+        } catch (uploadError) {
+          console.error("❌ Failed to upload to UploadThing:", uploadError);
+          // Fallback to local storage if UploadThing fails
+          const uploadPath = process.env.UPLOAD_PATH || "./uploads";
+          await fs.mkdir(uploadPath, { recursive: true });
+          const filePath = path.join(uploadPath, filename);
+          await fs.writeFile(filePath, buffer);
+          
+          variants.push({
+            url: `/uploads/${filename}`,
+            mimeType,
+            ext: mime.getExtension(mimeType),
+          });
+        }
 
         index++;
       }
@@ -184,150 +200,308 @@ export const generateImageWithGoogleAI = async (
   }
 };
 
-// Smart prompt enhancement for YouTube-style thumbnails with latest 2025 trends
-const enhancePromptForCategory = (prompt, category) => {
-  // Expert YouTube thumbnail maker persona
-  const expertPersona = "You are the #1 YouTube thumbnail designer in the world, with 10+ years creating viral thumbnails for top creators like MrBeast, PewDiePie, and Markiplier. You understand the latest 2025 YouTube algorithm trends, psychology of click-through rates, and what makes thumbnails go viral.";
-  
-  // Latest YouTube thumbnail trends (2025)
-  const latestTrends = "Use the latest 2025 YouTube thumbnail trends: bold, high-contrast text with drop shadows, dramatic facial expressions, bright neon colors, split-screen layouts, emoji integration, mystery elements, 'shock factor' that makes viewers curious, and AI-generated visual effects. Follow the '3-second rule' - viewers should understand the thumbnail instantly.";
-  
-  // Face detection and composition rules for 2025
-  const faceCompositionRules = "FACE DETECTION RULES: If the prompt mentions a person, face, or human subject, make the face LARGE and PROMINENT (occupying 40-60% of the thumbnail), positioned on one side of the screen with dramatic lighting and expression. Use the 'rule of thirds' - place the face in the left or right third for maximum impact. If no face is mentioned, create a bold, eye-catching composition with strong visual elements.";
-  
-  // Base YouTube thumbnail style with modern 2025 techniques
-  const baseStyle = "Create a viral-worthy YouTube thumbnail using 2025 best practices: 1280x720 resolution, high contrast, bold typography, dramatic lighting, and composition that stops scrolling. This should look like it belongs on trending YouTube videos with 1M+ views. Use modern AI-enhanced visual effects and trending design elements.";
-  
-  // Enhanced category-specific enhancements with latest 2025 trends and face detection
-  const categoryEnhancements = {
-    gaming: {
-      style: "2025 gaming aesthetic: neon cyberpunk vibes, dramatic lighting, bold gaming text, controller/keyboard elements, neon glows, and 'epic' atmosphere. If featuring a person, make their face LARGE (50-60% of thumbnail) with intense gaming expression, positioned on one side with neon lighting effects",
-      elements: "Include modern gaming elements: RGB lighting, neon effects, dramatic poses, gaming peripherals, AI-generated effects, and elements that appeal to Gen Z gamers",
-      colors: "Use trending 2025 gaming colors: electric blue, neon green, hot pink, bright orange, and cyberpunk purple with dark backgrounds for maximum contrast"
-    },
-    business: {
-      style: "2025 business aesthetic: clean corporate design, modern typography, data visualization, and professional imagery. If featuring a person, make their face PROMINENT (40-50% of thumbnail) with confident expression, positioned on one side with professional lighting",
-      elements: "Include business elements: charts, graphs, professional headshots, corporate symbols, AI-generated data visualizations, and elements that convey success and expertise",
-      colors: "Use professional 2025 colors: deep blue, corporate gray, accent gold, clean white, and modern tech accents for a trustworthy, premium look"
-    },
-    food: {
-      style: "2025 food aesthetic: high-quality food photography, warm lighting, appetizing presentation, and 'food porn' style. If featuring a person, make their face LARGE (45-55% of thumbnail) with delighted expression, positioned on one side with warm food lighting",
-      elements: "Include food elements: steam, garnishes, perfect plating, close-up shots, AI-enhanced food effects, and elements that trigger hunger and desire",
-      colors: "Use appetizing 2025 colors: warm orange, rich red, golden yellow, natural earth tones, and food-trending accent colors"
-    },
-    education: {
-      style: "2025 education aesthetic: clear, modern academic design, bold typography, and visual learning elements. If featuring a person, make their face PROMINENT (40-50% of thumbnail) with engaged expression, positioned on one side with clear, bright lighting",
-      elements: "Include educational elements: diagrams, charts, books, learning symbols, AI-generated visual aids, and elements that enhance understanding",
-      colors: "Use educational 2025 colors: clear blue, academic green, accent orange, high-contrast combinations, and modern learning colors"
-    },
-    entertainment: {
-      style: "2025 entertainment aesthetic: pop culture references, celebrity appeal, trending memes, and viral content elements. If featuring a person, make their face LARGE (50-60% of thumbnail) with dramatic expression, positioned on one side with vibrant entertainment lighting",
-      elements: "Include entertainment elements: stars, sparkles, trending symbols, celebrity imagery, AI-generated effects, and elements that create FOMO",
-      colors: "Use entertainment 2025 colors: vibrant purple, electric pink, bright yellow, neon accents, and colors that scream 'entertainment' and 'fun'"
-    },
-    technology: {
-      style: "2025 tech aesthetic: futuristic design, digital effects, AI/ML themes, and cutting-edge technology. If featuring a person, make their face PROMINENT (40-50% of thumbnail) with tech-savvy expression, positioned on one side with futuristic lighting",
-      elements: "Include tech elements: circuits, digital effects, futuristic interfaces, AI symbols, holographic elements, and elements that convey innovation",
-      colors: "Use tech 2025 colors: electric blue, neon green, digital purple, holographic accents, and colors that represent the future"
-    },
-    lifestyle: {
-      style: "2025 lifestyle aesthetic: aspirational, Instagram-worthy, trendsetting design. If featuring a person, make their face LARGE (45-55% of thumbnail) with aspirational expression, positioned on one side with soft, flattering lighting",
-      elements: "Include lifestyle elements: fashion, travel, wellness, luxury, AI-enhanced lifestyle effects, and elements that create aspiration",
-      colors: "Use lifestyle 2025 colors: trendy pastels, luxury gold, modern neutrals, and colors that represent the good life"
-    },
-    news: {
-      style: "2025 news aesthetic: authoritative, trustworthy, breaking news design. If featuring a person, make their face PROMINENT (40-50% of thumbnail) with serious expression, positioned on one side with professional news lighting",
-      elements: "Include news elements: headlines, breaking news graphics, journalistic imagery, AI-generated news effects, and elements that build trust",
-      colors: "Use news 2025 colors: authoritative red, trustworthy blue, clean white, and colors that convey seriousness and credibility"
-    },
-    sports: {
-      style: "2025 sports aesthetic: dynamic, action-packed, high-energy design. If featuring a person, make their face LARGE (50-60% of thumbnail) with intense athletic expression, positioned on one side with dynamic sports lighting",
-      elements: "Include sports elements: motion blur, action shots, athletic poses, team colors, AI-enhanced motion effects, and elements that convey energy",
-      colors: "Use sports 2025 colors: team colors, energetic orange, dynamic red, and colors that represent power and movement"
-    },
-    music: {
-      style: "2025 music aesthetic: artistic, creative, musical design. If featuring a person, make their face PROMINENT (45-55% of thumbnail) with passionate expression, positioned on one side with artistic lighting",
-      elements: "Include musical elements: instruments, sound waves, artistic imagery, AI-generated music effects, and elements that represent creativity",
-      colors: "Use musical 2025 colors: creative purple, artistic blue, vibrant red, and colors that represent emotion and creativity"
-    },
-    comedy: {
-      style: "2025 comedy aesthetic: fun, humorous, meme-worthy design. If featuring a person, make their face LARGE (50-60% of thumbnail) with exaggerated funny expression, positioned on one side with bright, cheerful lighting",
-      elements: "Include comedy elements: emojis, funny expressions, meme references, AI-generated humor effects, and elements that trigger laughter",
-      colors: "Use comedy 2025 colors: bright yellow, fun orange, cheerful pink, and colors that represent joy and humor"
-    },
-    travel: {
-      style: "2025 travel aesthetic: adventurous, inspiring, wanderlust design. If featuring a person, make their face PROMINENT (40-50% of thumbnail) with excited expression, positioned on one side with natural travel lighting",
-      elements: "Include travel elements: maps, landmarks, scenic imagery, AI-enhanced travel effects, and elements that represent adventure",
-      colors: "Use travel 2025 colors: sky blue, earth green, sunset orange, and colors that represent nature and adventure"
-    },
-    fitness: {
-      style: "2025 fitness aesthetic: energetic, motivational, health-focused design. If featuring a person, make their face LARGE (50-60% of thumbnail) with determined expression, positioned on one side with energetic lighting",
-      elements: "Include fitness elements: workout equipment, active poses, health imagery, AI-enhanced fitness effects, and elements that motivate",
-      colors: "Use fitness 2025 colors: energetic green, motivational orange, health blue, and colors that represent vitality and energy"
-    },
-    beauty: {
-      style: "2025 beauty aesthetic: elegant, glamorous, beauty-focused design. If featuring a person, make their face LARGE (50-60% of thumbnail) with beautiful expression, positioned on one side with flattering beauty lighting",
-      elements: "Include beauty elements: makeup, skincare, fashion, AI-enhanced beauty effects, and elements that represent beauty and glamour",
-      colors: "Use beauty 2025 colors: elegant pink, luxury gold, sophisticated white, and colors that represent beauty and elegance"
-    },
-    fashion: {
-      style: "2025 fashion aesthetic: trendy, stylish, fashion-forward design. If featuring a person, make their face PROMINENT (45-55% of thumbnail) with stylish expression, positioned on one side with fashion lighting",
-      elements: "Include fashion elements: clothing, accessories, runway imagery, AI-enhanced fashion effects, and elements that represent style and trends",
-      colors: "Use fashion 2025 colors: trending colors, luxury accents, modern neutrals, and colors that represent current fashion trends"
+// ---------------- NEW: Service Logo Detection & Prompt Enhancement ----------------
+
+// Map keywords to service/logo tokens we want to include in thumbnails
+const SERVICE_LOGOS = {
+  aws: ["AWS logo", "Amazon Web Services badge"],
+  amazon: ["Amazon logo", "AWS logo"],
+  google: ["Google logo", "GCP logo", "Google Cloud logo"],
+  gcp: ["GCP logo", "Google Cloud logo"],
+  azure: ["Microsoft Azure logo", "Azure logo"],
+  stripe: ["Stripe logo"],
+  paypal: ["PayPal logo"],
+  upi: ["UPI logo", "UPI apps icons"],
+  paytm: ["Paytm logo"],
+  youtube: ["YouTube logo"],
+  openai: ["OpenAI logo", "ChatGPT icon"],
+  spotify: ["Spotify logo"],
+  slack: ["Slack logo"],
+  firebase: ["Firebase logo"],
+  mongodb: ["MongoDB leaf logo"],
+  postgres: ["Postgres elephant logo"],
+  nginx: ["NGINX logo"],
+  vercel: ["Vercel logo"],
+  netlify: ["Netlify logo"],
+  // add more as needed
+};
+
+// Small utility to clean user headline text
+const cleanText = (txt = "") => String(txt).trim().replace(/\s{2,}/g, " ");
+
+// Detect services mentioned in prompt/options and return a comma-separated list etc.
+const detectServiceLogos = (basePrompt = "", options = {}) => {
+  const text = `${basePrompt} ${(options.imageStyleHints || "")} ${(options.headlineText || "")}`.toLowerCase();
+  const detected = new Set();
+
+  for (const key of Object.keys(SERVICE_LOGOS)) {
+    if (text.includes(key)) {
+      SERVICE_LOGOS[key].forEach(token => detected.add(token));
     }
-  };
+  }
 
-  const enhancement = categoryEnhancements[category] || categoryEnhancements.entertainment;
-  
-  // Build the enhanced prompt with expert persona, face detection rules, and latest 2025 trends
-  const enhancedPrompt = `${expertPersona} ${latestTrends} ${faceCompositionRules} ${baseStyle}. ${prompt}. Style: ${enhancement.style}. Elements: ${enhancement.elements}. Colors: ${enhancement.colors}. Create a thumbnail that would get 10%+ click-through rate and go viral on YouTube. Make it impossible to scroll past without clicking.`;
-  
-  console.log("🔍 DEBUG: Enhanced prompt for category:", category);
-  console.log("🔍 DEBUG: Original prompt:", prompt);
-  console.log("🔍 DEBUG: Enhanced prompt:", enhancedPrompt);
-  
-  return enhancedPrompt;
+  // Also check options.explicitLogos (caller can pass explicit list)
+  if (Array.isArray(options.explicitLogos)) {
+    options.explicitLogos.forEach(l => detected.add(l));
+  }
+
+  return Array.from(detected); // e.g. ["AWS logo", "Google logo"]
 };
 
-// Special prompt enhancement for refinement/editing existing images
-const enhancePromptForRefinement = (prompt, category) => {
-  // Expert image editor persona for refinements
-  const editorPersona = "You are the world's best image editor and YouTube thumbnail designer. You excel at modifying existing images while maintaining their core appeal and enhancing them with the latest 2025 YouTube thumbnail trends.";
-  
-  // Face detection rules for refinements
-  const faceRefinementRules = "FACE REFINEMENT RULES: If the image contains a person or face, ensure the face is LARGE and PROMINENT (40-60% of thumbnail), positioned on one side with dramatic lighting. If no face is present, create a bold, eye-catching composition with strong visual elements.";
-  
-  // Refinement-specific guidance
-  const refinementGuidance = "Carefully analyze the existing image and make the requested changes while preserving what makes it great. Apply the latest 2025 YouTube thumbnail techniques: enhance contrast, improve text readability, add trending elements, AI-enhanced effects, and ensure the final result looks like a professional thumbnail that would get high click-through rates.";
-  
-  // Category-specific refinement tips
-  const refinementTips = {
-    gaming: "Enhance gaming elements, improve neon effects, add trending gaming symbols, and make it more epic and click-worthy",
-    business: "Refine professional elements, improve typography, enhance data visualization, and maintain corporate credibility",
-    food: "Enhance food appeal, improve lighting, add appetizing elements, and make it more mouth-watering",
-    education: "Improve clarity, enhance visual learning elements, and make complex topics more accessible",
-    entertainment: "Add trending elements, enhance pop culture references, and make it more viral-worthy",
-    technology: "Enhance futuristic elements, improve digital effects, and make it look more cutting-edge",
-    lifestyle: "Enhance aspirational elements, improve visual appeal, and make it more Instagram-worthy",
-    news: "Maintain authority, improve headline clarity, and enhance breaking news impact",
-    sports: "Enhance energy and action, improve dynamic elements, and make it more exciting",
-    music: "Enhance artistic elements, improve emotional impact, and make it more creative",
-    comedy: "Enhance humor elements, add trending memes, and make it more shareable",
-    travel: "Enhance adventure appeal, improve scenic elements, and make it more inspiring",
-    fitness: "Enhance motivational elements, improve energy, and make it more inspiring",
-    beauty: "Enhance glamour, improve beauty elements, and make it more aspirational",
-    fashion: "Enhance style elements, improve trendiness, and make it more fashion-forward"
-  };
-  
-  const tip = refinementTips[category] || refinementTips.entertainment;
-  
-  // Build the refinement prompt with face detection rules
-  const refinementPrompt = `${editorPersona} ${faceRefinementRules} ${refinementGuidance} ${tip}. ${prompt}. Make the requested changes while maintaining the image's viral potential and ensuring it follows 2025 YouTube thumbnail best practices. The result should be even more click-worthy than the original.`;
-  
-  console.log("🔍 DEBUG: Refinement prompt for category:", category);
-  console.log("🔍 DEBUG: Original prompt:", prompt);
-  console.log("🔍 DEBUG: Refinement prompt:", refinementPrompt);
-  
-  return refinementPrompt;
+// Universal category presets (based on your earlier categories + observed trends)
+const CATEGORY_PRESETS = {
+  gaming: {
+    archetype: "neon cyberpunk gaming",
+    faceSize: "50-60%",
+    faceMood: "intense, focused, triumphant",
+    composition: "face on right third, dynamic action on left with motion blur",
+    elements: "controller, RGB glow, HUD overlays, neon sparks",
+    colors: "electric blue, neon green, hot pink, cyberpunk purple",
+    vibe: "epic, high-energy, 'can't miss' moment"
+  },
+  business: {
+    archetype: "clean corporate premium",
+    faceSize: "40-50%",
+    faceMood: "confident, assured",
+    composition: "face on left third, data viz / upward graph on right",
+    elements: "graph, chart, dollar symbol, polished headshot",
+    colors: "deep blue, gray, accent gold, clean white",
+    vibe: "trustworthy, expert, 'results-driven'"
+  },
+  food: {
+    archetype: "appetizing close-up food photography",
+    faceSize: "45-55%",
+    faceMood: "delighted, satisfied",
+    composition: "large close-up of food with face reacting on side",
+    elements: "steam, garnish, close-up texture, glossy highlights",
+    colors: "warm orange, rich red, golden yellow, earth tones",
+    vibe: "mouth-watering, irresistible"
+  },
+  education: {
+    archetype: "clear modern academic design",
+    faceSize: "40-50%",
+    faceMood: "engaged, confident",
+    composition: "face on one side, diagrams/text on the other",
+    elements: "diagrams, icons, charts, AI visual aids",
+    colors: "clear blue, academic green, accent orange",
+    vibe: "clear, authoritative, helpful"
+  },
+  entertainment: {
+    archetype: "viral pop-culture entertainment",
+    faceSize: "50-60%",
+    faceMood: "dramatic, excited",
+    composition: "face on one side, pop element on the other",
+    elements: "sparkles, stars, trending symbols, celebrity imagery",
+    colors: "vibrant purple, electric pink, neon yellow",
+    vibe: "fun, viral, high-energy"
+  },
+  technology: {
+    archetype: "futuristic tech & AI",
+    faceSize: "40-50%",
+    faceMood: "curious, tech-savvy",
+    composition: "face on one side, holographic UI on the other",
+    elements: "circuits, holograms, AI/ML icons, subtle grids",
+    colors: "electric blue, neon green, digital purple",
+    vibe: "innovative, cutting-edge"
+  },
+  lifestyle: {
+    archetype: "aspirational instagram-worthy",
+    faceSize: "45-55%",
+    faceMood: "happy, aspirational",
+    composition: "face on one side, lifestyle scene on other",
+    elements: "fashion/accessories, travel, luxury cues",
+    colors: "trendy pastels, luxury gold, modern neutrals",
+    vibe: "aspirational, stylish"
+  },
+  news: {
+    archetype: "authoritative breaking news",
+    faceSize: "40-50%",
+    faceMood: "serious, concerned",
+    composition: "face on one side, headline/block on other",
+    elements: "breaking-badge, headline strip, newsroom elements",
+    colors: "authoritative red, trustworthy blue, clean white",
+    vibe: "urgent, credible"
+  },
+  sports: {
+    archetype: "dynamic action sports",
+    faceSize: "50-60%",
+    faceMood: "intense, determined",
+    composition: "face on side, action/motion on other",
+    elements: "motion blur, ball/gear, team colors",
+    colors: "energetic orange, dynamic red, team colors",
+    vibe: "high-energy, competitive"
+  },
+  music: {
+    archetype: "artistic musical energy",
+    faceSize: "45-55%",
+    faceMood: "passionate, intense",
+    composition: "face on side, instrument/notes on other",
+    elements: "sound waves, instruments, stage lights",
+    colors: "creative purple, artistic blue, vibrant red",
+    vibe: "emotional, creative"
+  },
+  comedy: {
+    archetype: "bright meme-ready comedy",
+    faceSize: "50-60%",
+    faceMood: "exaggerated, silly",
+    composition: "face large with exaggerated expression",
+    elements: "emojis, meme overlays, funny props",
+    colors: "bright yellow, fun orange, cheerful pink",
+    vibe: "joyful, shareable"
+  },
+  travel: {
+    archetype: "adventurous travel & wonder",
+    faceSize: "40-50%",
+    faceMood: "excited, amazed",
+    composition: "face on one side, landmark/vehicle on other",
+    elements: "map, landmark, scenic background, suitcase",
+    colors: "sky blue, earth green, sunset orange",
+    vibe: "wanderlust, inspirational"
+  },
+  fitness: {
+    archetype: "motivational fitness energy",
+    faceSize: "50-60%",
+    faceMood: "determined, focused",
+    composition: "face on side, action/movement on other",
+    elements: "workout gear, sweat, motion effects",
+    colors: "energetic green, motivational orange, health blue",
+    vibe: "empowering, active"
+  },
+  beauty: {
+    archetype: "glamorous beauty close-up",
+    faceSize: "50-60%",
+    faceMood: "confident, flawless",
+    composition: "face large with soft flattering light",
+    elements: "makeup close-up, smooth skin retouch",
+    colors: "elegant pink, luxury gold, sophisticated white",
+    vibe: "glamour, aspiration"
+  },
+  fashion: {
+    archetype: "trendy fashion-forward",
+    faceSize: "45-55%",
+    faceMood: "stylish, confident",
+    composition: "face on side, outfit/pose on other",
+    elements: "runway cues, accessories, bold typography",
+    colors: "trending colors, luxury accents, modern neutrals",
+    vibe: "stylish, editorial"
+  },
+  other: {
+    archetype: "viral-ready generic",
+    faceSize: "45-55%",
+    faceMood: "dramatic",
+    composition: "face on one side, bold element on other",
+    elements: "clear iconography, single focused prop",
+    colors: "bright high-contrast palette",
+    vibe: "attention-grabbing"
+  }
 };
 
+// Negative constraints to prevent common failures
+const NEGATIVES = [
+  "no small unreadable text",
+  "no cluttered layout",
+  "avoid washed-out colors or low contrast",
+  "avoid unnatural skin tones",
+  "no watermarks or logos",
+  "avoid busy backgrounds that hide main subject"
+].join(", ");
+
+// Build a consistent thumbnail prompt from tokens (now includes detected logos)
+const buildThumbnailPrompt = ({
+  basePrompt,
+  category = "entertainment",
+  facePresent = false,
+  headlineText = "",
+  subText = "",
+  emotion = "",          // e.g. "shocked", "delighted", "angry"
+  cta = "",              // optional CTA text: "Watch Now", "Don't Miss"
+  imageStyleHints = "",  // any extra hints from user e.g. "use my sample image"
+  size = "1280x720",
+  options = {}
+}) => {
+  const preset = CATEGORY_PRESETS[category] || CATEGORY_PRESETS["other"];
+
+  // detect logos and add to hints
+  const detectedLogos = detectServiceLogos(basePrompt, options);
+  const logosInstruction = detectedLogos.length
+    ? `Include these service logos/icons: ${detectedLogos.join(", ")}. Place them small but clearly visible in a corner or near related prop; ensure logos are legible and not distorted.`
+    : "";
+
+  const FACE_RULE = facePresent
+    ? `IF FACE: Place face LARGE (${preset.faceSize}) occupying the left OR right third. Expression: ${emotion || preset.faceMood}. Dramatic lighting, high contrast, slight vignette.`
+    : "No face: create a bold, high-contrast central focal point with strong shapes and AI-enhanced effects.";
+
+  const TEXT_INSTRUCTIONS = headlineText
+    ? `Primary headline text (big, readable): "${cleanText(headlineText)}" — place as a 2-line max, very bold, with heavy drop shadow and outline for legibility.`
+    : "No primary headline text required.";
+
+  const SUBTEXT_INSTRUCTIONS = subText
+    ? `Secondary text (small): "${cleanText(subText)}" — keep <30% width, high contrast, simple font.`
+    : "";
+
+  const CTA_INSTRUCTION = cta ? `Add a small CTA badge: "${cleanText(cta)}" placed top-left or bottom-right.` : "";
+
+  const composed = [
+    "You are the #1 YouTube thumbnail creator: produce a thumbnail that is 'scroll-stopping' and optimized for maximum CTR on YouTube in 2025.",
+    `Output must be sized ${size} and ready for immediate upload as a high-impact thumbnail.`,
+    `Style archetype: ${preset.archetype}. Vibe: ${preset.vibe}. Colors: ${preset.colors}. Elements to include: ${preset.elements}. Composition hint: ${preset.composition}.`,
+    FACE_RULE,
+    TEXT_INSTRUCTIONS,
+    SUBTEXT_INSTRUCTIONS,
+    CTA_INSTRUCTION,
+    "Use bold, high-contrast typography with heavy drop shadows and outlines so text is readable even on mobile thumbnails. Use dramatic lighting and AI-enhanced effects (glows, particle sparks, subtle chromatic aberration) to increase perceived quality.",
+    "Integrate a 'mystery' or 'shock' element that creates curiosity but doesn't mislead. Keep designs consistent with top creators (large faces, one bold headline, simple readable layout). Follow the 3-second rule — the thumbnail must communicate at a glance.",
+    logosInstruction,
+    `Constraints: ${NEGATIVES}.`,
+    basePrompt ? `User request / instruction: ${basePrompt}.` : "",
+    imageStyleHints ? `Image hints: ${imageStyleHints}.` : "",
+    "Return only image content (do not include generation metadata in the image). Create 3 strong variants (different color accents, text sizes, and facial crops) and prioritize readability for mobile."
+  ].filter(Boolean).join(" ");
+
+  console.log("🔍 DEBUG: Built thumbnail prompt:", composed.slice(0, 350), "...");
+  return composed;
+};
+
+// Backward-compatible enhancePromptForCategory
+const enhancePromptForCategory = (prompt, category = "entertainment", options = {}) => {
+  // allow callers that only pass (prompt, category)
+  const opts = options || {};
+  const enhanced = buildThumbnailPrompt({
+    basePrompt: prompt,
+    category,
+    facePresent: Boolean(opts.facePresent || /face|me|I |person|human/i.test(prompt)),
+    headlineText: opts.headlineText || "",
+    subText: opts.subText || "",
+    emotion: opts.emotion || "",
+    cta: opts.cta || "",
+    imageStyleHints: opts.imageStyleHints || "",
+    size: `${opts.width || 1280}x${opts.height || 720}`,
+    options: opts
+  });
+
+  console.log("🔍 DEBUG: enhancePromptForCategory =>", { category, options: opts });
+  return enhanced;
+};
+
+// Backward-compatible enhancePromptForRefinement
+const enhancePromptForRefinement = (prompt, category = "entertainment", options = {}) => {
+  const opts = options || {};
+  const preservation = "Preserve the original photo's core content and likeness. Improve contrast, crop for face prominence if needed, retouch skin subtly, enhance expression clarity, and increase text readability without obscuring important areas.";
+  const refinementHints = opts.refinementHints || "Enhance contrast, remove noise, refine eyes and mouth for stronger emotion, add subtle glow to main subject.";
+
+  const enhanced = buildThumbnailPrompt({
+    basePrompt: `${preservation} ${refinementHints} ${prompt}`,
+    category,
+    facePresent: Boolean(opts.facePresent || /face|person|self|me/i.test(prompt)),
+    headlineText: opts.headlineText || "",
+    subText: opts.subText || "",
+    emotion: opts.emotion || "",
+    cta: opts.cta || "",
+    imageStyleHints: `Use provided reference images as the visual base; prioritize face crop and lighting. ${opts.imageStyleHints || ""}`,
+    size: `${opts.width || 1280}x${opts.height || 720}`,
+    options: opts
+  });
+
+  console.log("🔍 DEBUG: enhancePromptForRefinement =>", { category, options: opts });
+  return enhanced;
+};

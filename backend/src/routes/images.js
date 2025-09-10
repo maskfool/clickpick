@@ -7,6 +7,7 @@ import { protect } from "../middleware/auth.js";
 import { body, validationResult } from "express-validator";
 import { fileURLToPath } from "url";
 import { generateImageWithGoogleAI } from "../services/googleAI.js"; // 👈 Gemini service
+// Removed UploadThing dependency - using local storage only
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,6 +26,16 @@ const upload = multer({
   limits: {
     fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024,
     files: 1,
+  },
+});
+
+// Multiple file upload for reference images
+const uploadMultiple = multer({
+  storage,
+  fileFilter,
+  limits: {
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024,
+    files: 5, // Allow up to 5 files
   },
 });
 
@@ -86,18 +97,29 @@ router.post("/upload-photo", protect, upload.single("photo"), async (req, res) =
   try {
     if (!req.file) return res.status(400).json({ success: false, error: "No file uploaded" });
 
-    const uploadPath = await ensureUploadDir();
+    // Process image with Sharp
+    const processedBuffer = await sharp(req.file.buffer)
+      .resize(200, 200, { fit: "cover" })
+      .webp({ quality: 80 })
+      .toBuffer();
+
     const fileName = `user-${req.user._id}-${Date.now()}.webp`;
+    
+    // Upload to local storage
+    const uploadPath = await ensureUploadDir();
     const filePath = path.join(uploadPath, fileName);
-
-    await sharp(req.file.buffer).resize(200, 200, { fit: "cover" }).webp({ quality: 80 }).toFile(filePath);
-
+    await fs.writeFile(filePath, processedBuffer);
     const stats = await fs.stat(filePath);
 
     res.json({
       success: true,
       message: "Photo uploaded successfully",
-      data: { imageUrl: `/uploads/${fileName}`, fileName, size: stats.size, mimetype: "image/webp" },
+      data: { 
+        imageUrl: `/uploads/${fileName}`, 
+        fileName: fileName, 
+        size: stats.size, 
+        mimetype: "image/webp" 
+      },
     });
   } catch (error) {
     console.error("Photo upload error:", error);
@@ -112,17 +134,20 @@ router.post("/upload-reference", protect, upload.single("reference"), async (req
   try {
     if (!req.file) return res.status(400).json({ success: false, error: "No file uploaded" });
 
-    const uploadPath = await ensureUploadDir();
-    const fileName = `ref-${req.user._id}-${Date.now()}.webp`;
-    const filePath = path.join(uploadPath, fileName);
-
-    await sharp(req.file.buffer)
+    // Process image with Sharp
+    const processedBuffer = await sharp(req.file.buffer)
       .resize(800, 600, { fit: "inside", withoutEnlargement: true })
       .webp({ quality: 85 })
-      .toFile(filePath);
+      .toBuffer();
 
+    const fileName = `ref-${req.user._id}-${Date.now()}.webp`;
+    const metadata = await sharp(processedBuffer).metadata();
+    
+    // Upload to local storage
+    const uploadPath = await ensureUploadDir();
+    const filePath = path.join(uploadPath, fileName);
+    await fs.writeFile(filePath, processedBuffer);
     const stats = await fs.stat(filePath);
-    const metadata = await sharp(filePath).metadata();
 
     res.json({
       success: true,
@@ -139,6 +164,52 @@ router.post("/upload-reference", protect, upload.single("reference"), async (req
   } catch (error) {
     console.error("Reference upload error:", error);
     res.status(500).json({ success: false, error: "Server error while uploading reference" });
+  }
+});
+
+// @desc    Upload multiple reference images
+// @route   POST /api/images/upload-multiple-reference
+// @access  Private
+router.post("/upload-multiple-reference", protect, uploadMultiple.array("files", 5), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, error: "No files uploaded" });
+    }
+
+    const uploadPath = await ensureUploadDir();
+    const uploadedFiles = [];
+
+    for (const file of req.files) {
+      // Process image with Sharp
+      const processedBuffer = await sharp(file.buffer)
+        .resize(800, 600, { fit: "inside", withoutEnlargement: true })
+        .webp({ quality: 85 })
+        .toBuffer();
+
+      const fileName = `ref-${req.user._id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.webp`;
+      const filePath = path.join(uploadPath, fileName);
+      await fs.writeFile(filePath, processedBuffer);
+      const stats = await fs.stat(filePath);
+      const metadata = await sharp(processedBuffer).metadata();
+
+      uploadedFiles.push({
+        imageUrl: `/uploads/${fileName}`,
+        fileName,
+        size: stats.size,
+        width: metadata.width,
+        height: metadata.height,
+        mimetype: "image/webp",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `${uploadedFiles.length} reference images uploaded successfully`,
+      data: uploadedFiles,
+    });
+  } catch (error) {
+    console.error("Multiple reference upload error:", error);
+    res.status(500).json({ success: false, error: "Server error while uploading reference images" });
   }
 });
 

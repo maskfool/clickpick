@@ -33,7 +33,7 @@ import { GenerationCounter } from "../components/GenerationCounter";
 import { ImageUpload } from "../components/ImageUpload";
 import { thumbnailsAPI } from "@/services/api";
 
-const MAX_REFINEMENTS = 5;
+const MAX_REFINEMENTS = 100; // Increased for local testing
 
 const Dashboard = () => {
   const { logout } = useAuthStore();
@@ -84,8 +84,10 @@ const Dashboard = () => {
 
       // upload to backend
       const res = await thumbnailsAPI.uploadReference(file);
-      if (res.data?.success) {
-        setReferenceImage(res.data.data.relativePath);
+      if (res.data) {
+        // UploadThing FileRouter returns file data directly
+        const fileData = Array.isArray(res.data) ? res.data[0] : res.data;
+        setReferenceImage(fileData.relativePath || fileData.key);
         toast.success("Reference image uploaded!");
       } else {
         toast.error("Failed to upload reference image");
@@ -98,7 +100,7 @@ const Dashboard = () => {
 
   // ✅ Generate
   const generateThumbnail = async () => {
-    if (generationCount >= 5) {
+    if (generationCount >= 100) { // Increased for local testing
       toast.error("Generation limit reached! Upgrade to Pro for unlimited generations.");
       return;
     }
@@ -187,7 +189,7 @@ const Dashboard = () => {
       return;
     }
     if (refinementCount >= MAX_REFINEMENTS) {
-      toast.error("You’ve reached the max refinements (5).");
+      toast.error(`You've reached the max refinements (${MAX_REFINEMENTS}).`);
       return;
     }
 
@@ -444,9 +446,9 @@ const Dashboard = () => {
               <CardContent className="pt-6">
                 <Button
                   onClick={generateThumbnail}
-                  disabled={isGenerating || generationCount >= 5}
+                  disabled={isGenerating || generationCount >= 100}
                   className="w-full h-12"
-                  variant={generationCount >= 5 ? "outline" : "default"}
+                  variant={generationCount >= 100 ? "outline" : "default"}
                   size="lg"
                 >
                   {isGenerating ? (
@@ -454,7 +456,7 @@ const Dashboard = () => {
                       <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
                       Generating...
                     </>
-                  ) : generationCount >= 5 ? (
+                  ) : generationCount >= 100 ? (
                     <>
                       <Crown className="w-5 h-5 mr-2" />
                       Upgrade to Generate
@@ -494,7 +496,7 @@ const Dashboard = () => {
               onRefineRequest={handleRefineRequest}
               currentPrompt={prompt}
               generationCount={generationCount}
-              maxGenerationCount={5}
+              maxGenerationCount={100}
               onUpgrade={handleUpgrade}
             />
           </div>

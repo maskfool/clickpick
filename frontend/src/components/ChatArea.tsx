@@ -22,7 +22,7 @@ interface ChatAreaProps {
   onUpgrade?: () => void;
 }
 
-export const ChatArea = ({ onPromptRefinement, onRefineRequest, currentPrompt, generationCount = 0, maxGenerationCount = 5, onUpgrade }: ChatAreaProps) => {
+export const ChatArea = ({ onPromptRefinement, onRefineRequest, currentPrompt, generationCount = 0, maxGenerationCount = 100, onUpgrade }: ChatAreaProps) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",

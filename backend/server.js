@@ -11,6 +11,7 @@ import authRoutes from './src/routes/auth.js';
 import thumbnailRoutes from './src/routes/thumbnails.js';
 import imageRoutes from './src/routes/images.js';
 import chatRoutes from './src/routes/chat.js';
+// Removed UploadThing routes - using local file uploads
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -80,6 +81,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/thumbnails', thumbnailRoutes);
 app.use('/api/images', imageRoutes);
 app.use('/api/chat', chatRoutes);
+// Removed UploadThing routes - using local file uploads
 
 // 404 handler
 app.use('*', (req, res) => {
