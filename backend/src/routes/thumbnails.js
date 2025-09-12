@@ -12,6 +12,13 @@ const router = express.Router();
 // Helper to build absolute URLs
 const buildAbsoluteUrl = (req, relativePath) => {
   if (!relativePath) return null;
+  
+  // If it's already a full URL (Cloudinary), return as-is
+  if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+    return relativePath;
+  }
+  
+  // Otherwise, build absolute URL for local paths
   return `${req.protocol}://${req.get("host")}${relativePath}`;
 };
 

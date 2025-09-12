@@ -1,10 +1,12 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Upload, X, Image as ImageIcon, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { useUploadThing } from "@/lib/uploadthing";
+import { useReferenceImages, useImageActions } from "@/stores/imageStore";
+import ImageGallery from "./ImageGallery";
 
 interface ImageUploadProps {
   onImagesChange: (images: string[]) => void;
@@ -12,6 +14,7 @@ interface ImageUploadProps {
   onImagePathsChange?: (paths: string[]) => void; // For backend relative paths
   maxImages?: number;
   showTextInput?: boolean;
+  showGallery?: boolean;
 }
 
 export const ImageUpload = ({ 
@@ -19,39 +22,27 @@ export const ImageUpload = ({
   onTextPromptChange, 
   onImagePathsChange,
   maxImages = 5, 
-  showTextInput = false 
+  showTextInput = false,
+  showGallery = true
 }: ImageUploadProps) => {
-  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
-  const [imagePaths, setImagePaths] = useState<string[]>([]); // Backend relative paths
   const [textPrompt, setTextPrompt] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Zustand store
+  const referenceImages = useReferenceImages();
+  const { clearReferenceImages } = useImageActions();
+  
+  // Upload hook
+  const { startUpload, isUploading } = useUploadThing("multipleReferenceImagesUploader");
 
-  // Use UploadThing hook for manual control
-  const { startUpload, isUploading: isUploadThingLoading } = useUploadThing("multipleReferenceImagesUploader");
-
-  const handleUploadComplete = (res: any) => {
-    console.log("Files uploaded:", res);
+  // Update parent components when images change
+  useEffect(() => {
+    const imageUrls = referenceImages.map(img => img.imageUrl);
+    const imagePaths = referenceImages.map(img => img.fileName);
     
-    if (res && res.length > 0) {
-      const newPaths = res.map((img: any) => img.fileName);
-      const newPreviews = res.map((img: any) => `http://localhost:5001${img.imageUrl}`);
-      
-      // Update state
-      setImagePaths(prev => {
-        const updated = [...prev, ...newPaths];
-        onImagePathsChange?.(updated);
-        return updated;
-      });
-      
-      setUploadedImages(prev => {
-        const updated = [...prev, ...newPreviews];
-        onImagesChange(updated);
-        return updated;
-      });
-      
-      toast.success(`${res.length} image(s) uploaded successfully!`);
-    }
-  };
+    onImagesChange(imageUrls);
+    onImagePathsChange?.(imagePaths);
+  }, [referenceImages, onImagesChange, onImagePathsChange]);
 
   const handleUploadError = (error: Error) => {
     console.error("Upload error:", error);
@@ -59,7 +50,7 @@ export const ImageUpload = ({
   };
 
   const handleFileUpload = async (files: File[]) => {
-    if (uploadedImages.length + files.length > maxImages) {
+    if (referenceImages.length + files.length > maxImages) {
       toast.error(`You can only upload up to ${maxImages} images`);
       return;
     }
@@ -73,12 +64,9 @@ export const ImageUpload = ({
     }
 
     try {
-      // Use UploadThing's startUpload function
-      const res = await startUpload(files);
-      
-      if (res) {
-        handleUploadComplete(res);
-      }
+      // Use the enhanced upload function
+      await startUpload(files);
+      toast.success(`${files.length} image(s) uploaded successfully!`);
     } catch (error) {
       handleUploadError(error as Error);
     }
@@ -102,27 +90,19 @@ export const ImageUpload = ({
     await handleFileUpload(files);
   };
 
-  const removeImage = (index: number) => {
-    setUploadedImages(prev => {
-      const updated = prev.filter((_, i) => i !== index);
-      onImagesChange(updated);
-      return updated;
-    });
-    
-    setImagePaths(prev => {
-      const updated = prev.filter((_, i) => i !== index);
-      onImagePathsChange?.(updated);
-      return updated;
-    });
-  };
-
   const handleTextPromptChange = (value: string) => {
     setTextPrompt(value);
     onTextPromptChange?.(value);
   };
 
+  const handleClearAll = () => {
+    clearReferenceImages();
+    toast.success("All images cleared");
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Upload Area */}
       <div
         onClick={() => fileInputRef.current?.click()}
         onDragOver={handleDragOver}
@@ -131,7 +111,7 @@ export const ImageUpload = ({
       >
         <div className="flex flex-col items-center gap-3">
           <div className="w-12 h-12 bg-gradient-primary rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-            {isUploadThingLoading ? (
+            {isUploading ? (
               <div className="w-6 h-6 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
             ) : (
               <Upload className="w-6 h-6 text-primary-foreground" />
@@ -139,10 +119,10 @@ export const ImageUpload = ({
           </div>
           <div>
             <p className="text-sm font-medium text-foreground">
-              {isUploadThingLoading ? "Uploading..." : "Upload Images"}
+              {isUploading ? "Uploading..." : "Upload Images"}
             </p>
             <p className="text-xs text-muted-foreground">
-              Drop files here or click to browse ({uploadedImages.length}/{maxImages})
+              Drop files here or click to browse ({referenceImages.length}/{maxImages})
             </p>
           </div>
         </div>
@@ -157,44 +137,48 @@ export const ImageUpload = ({
         className="hidden"
       />
 
-      {uploadedImages.length > 0 && (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            {uploadedImages.map((image, index) => (
-              <Card key={index} className="relative group overflow-hidden bg-card/50 backdrop-blur-sm border-border/50">
-                <img
-                  src={image}
-                  alt={`Upload ${index + 1}`}
-                  className="w-full h-24 object-cover"
-                />
-                <Button
-                  onClick={() => removeImage(index)}
-                  variant="destructive"
-                  size="icon"
-                  className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                >
-                  <X className="w-3 h-3" />
-                </Button>
-              </Card>
-            ))}
+      {/* Image Gallery */}
+      {showGallery && referenceImages.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Uploaded Images</h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClearAll}
+              className="text-destructive hover:text-destructive"
+            >
+              <X className="w-4 h-4 mr-2" />
+              Clear All
+            </Button>
           </div>
-          
-          {showTextInput && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-white">
-                Additional Text Prompt (Optional)
-              </label>
-              <Textarea
-                value={textPrompt}
-                onChange={(e) => handleTextPromptChange(e.target.value)}
-                placeholder="Add additional text description to enhance your images..."
-                className="min-h-[80px] bg-input/80 backdrop-blur-sm border-border/50 text-white placeholder:text-gray-400 focus:border-primary focus:ring-primary/20"
-              />
-              <p className="text-xs text-gray-300">
-                This text will be combined with your uploaded images to generate the thumbnail
-              </p>
-            </div>
-          )}
+          <ImageGallery 
+            maxImages={maxImages}
+            onImageSelect={(imageId) => {
+              // Handle image selection if needed
+            }}
+            onImageRemove={(imageId) => {
+              // Handle image removal if needed
+            }}
+          />
+        </div>
+      )}
+
+      {/* Text Input */}
+      {showTextInput && (
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">
+            Additional Text Prompt (Optional)
+          </label>
+          <Textarea
+            value={textPrompt}
+            onChange={(e) => handleTextPromptChange(e.target.value)}
+            placeholder="Add additional text description to enhance your images..."
+            className="min-h-[80px] bg-input/80 backdrop-blur-sm border-border/50 text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-primary/20"
+          />
+          <p className="text-xs text-muted-foreground">
+            This text will be combined with your uploaded images to generate the thumbnail
+          </p>
         </div>
       )}
     </div>

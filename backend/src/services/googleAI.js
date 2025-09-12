@@ -3,7 +3,8 @@ import { GoogleGenAI } from "@google/genai";
 import mime from "mime";
 import fs from "fs/promises";
 import path from "path";
-import { uploadToUploadThing } from "./uploadthing.js";
+import cloudinaryService from "./cloudinary.js";
+import mem0Service from "./mem0.js";
 
 let ai = null;
 
@@ -27,35 +28,61 @@ const initializeAI = () => {
 
 // Helper function to process a single reference image
 const processReferenceImage = async (referenceImage, contents) => {
-  let refPath;
   let imageBuffer;
   let mimeType;
   
   console.log("🔍 DEBUG: Processing reference image:", referenceImage);
   
-  // Handle /uploads/ paths (most common case)
-  if (referenceImage.startsWith('/uploads/')) {
-    refPath = path.join(process.cwd(), referenceImage);
-  } else if (referenceImage.startsWith('uploads/')) {
-    refPath = path.join(process.cwd(), referenceImage);
-  } else {
-    // Fallback: assume it's in uploads folder
-    refPath = path.join(process.cwd(), 'uploads', referenceImage);
+  try {
+    // Handle Cloudinary URLs
+    if (referenceImage.includes('cloudinary.com')) {
+      // Download image from Cloudinary URL
+      const response = await fetch(referenceImage);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image from Cloudinary: ${response.statusText}`);
+      }
+      imageBuffer = Buffer.from(await response.arrayBuffer());
+      mimeType = response.headers.get('content-type') || "image/webp";
+    } else if (referenceImage.startsWith('clickpick/')) {
+      // Handle Cloudinary public IDs - construct full URL
+      const cloudinaryUrl = `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${referenceImage}.webp`;
+      console.log("🔍 DEBUG: Constructed Cloudinary URL:", cloudinaryUrl);
+      
+      const response = await fetch(cloudinaryUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image from Cloudinary: ${response.statusText}`);
+      }
+      imageBuffer = Buffer.from(await response.arrayBuffer());
+      mimeType = response.headers.get('content-type') || "image/webp";
+    } else {
+      // Handle local file paths (fallback for existing uploads)
+      let refPath;
+      if (referenceImage.startsWith('/uploads/')) {
+        refPath = path.join(process.cwd(), referenceImage);
+      } else if (referenceImage.startsWith('uploads/')) {
+        refPath = path.join(process.cwd(), referenceImage);
+      } else {
+        refPath = path.join(process.cwd(), 'uploads', referenceImage);
+      }
+      
+      console.log("🔍 DEBUG: Resolved to local path:", refPath);
+      imageBuffer = await fs.readFile(refPath);
+      mimeType = mime.getType(refPath) || "image/png";
+    }
+    
+    // Add reference image to the contents array
+    contents.push({
+      inlineData: {
+        mimeType,
+        data: imageBuffer.toString("base64"),
+      },
+    });
+    
+    console.log("✅ Attached referenceImage:", referenceImage);
+  } catch (error) {
+    console.error("❌ Failed to process reference image:", error);
+    throw error;
   }
-  
-  console.log("🔍 DEBUG: Resolved to local path:", refPath);
-  imageBuffer = await fs.readFile(refPath);
-  mimeType = mime.getType(refPath) || "image/png";
-  
-  // Add reference image to the contents array (matching Google docs example)
-  contents.push({
-    inlineData: {
-      mimeType,
-      data: imageBuffer.toString("base64"),
-    },
-  });
-  
-  console.log("✅ Attached referenceImage:", referenceImage, "from path:", refPath);
 };
 
 export const generateImageWithGoogleAI = async (
@@ -80,14 +107,28 @@ export const generateImageWithGoogleAI = async (
 
     const model = "gemini-2.5-flash-image-preview";
     
+    // Get user context from Mem0 if userId is provided
+    let userContext = null;
+    if (options.userId) {
+      try {
+        userContext = await mem0Service.getGenerationContext(options.userId, prompt);
+        console.log("🔍 DEBUG: Retrieved user context from Mem0:", {
+          chatHistory: userContext.chatHistory.length,
+          imageHistory: userContext.imageHistory.length,
+          relevantMemories: userContext.relevantMemories.length
+        });
+      } catch (error) {
+        console.warn("⚠️ Failed to get user context from Mem0:", error.message);
+      }
+    }
+    
     // Check if this is a refinement (has reference image) or new generation
     const isRefinement = !!(options.referenceImage || (options.referenceImages && options.referenceImages.length > 0));
     
-    // Enhance prompt based on category and whether it's refinement or new generation
-    // Backward-compatible: some callers pass only (prompt, category) so options may be undefined
+    // Enhance prompt based on category, user context, and whether it's refinement or new generation
     const enhancedPrompt = isRefinement 
-      ? enhancePromptForRefinement(prompt, category, options)
-      : enhancePromptForCategory(prompt, category, options);
+      ? enhancePromptForRefinement(prompt, category, { ...options, userContext })
+      : enhancePromptForCategory(prompt, category, { ...options, userContext });
     
     // Build content array with the EXACT structure from the working Google example
     const contents = [
@@ -146,23 +187,44 @@ export const generateImageWithGoogleAI = async (
         const mimeType = part.inlineData.mimeType || "image/png";
         const buffer = Buffer.from(part.inlineData.data, "base64");
 
-        const filename = `ai-${Date.now()}-${index}.${mime.getExtension(mimeType)}`;
-        
         try {
-          // Upload to UploadThing instead of local storage
-          const uploadResult = await uploadToUploadThing(buffer, filename, mimeType);
+          // Upload to Cloudinary
+          const uploadResult = await cloudinaryService.uploadGeneratedImage(
+            buffer, 
+            options.userId || 'anonymous', 
+            prompt
+          );
           
           variants.push({
-            url: uploadResult.url,
-            key: uploadResult.key,
+            url: uploadResult.secure_url,
+            publicId: uploadResult.public_id,
             mimeType,
             ext: mime.getExtension(mimeType),
           });
+
+          // Store image reference in Mem0 if userId is provided
+          if (options.userId) {
+            try {
+              await mem0Service.storeImageReference(
+                options.userId,
+                uploadResult.secure_url,
+                'generated',
+                {
+                  prompt: prompt,
+                  category: category,
+                  public_id: uploadResult.public_id
+                }
+              );
+            } catch (memError) {
+              console.warn("⚠️ Failed to store image reference in Mem0:", memError.message);
+            }
+          }
         } catch (uploadError) {
-          console.error("❌ Failed to upload to UploadThing:", uploadError);
-          // Fallback to local storage if UploadThing fails
+          console.error("❌ Failed to upload to Cloudinary:", uploadError);
+          // Fallback to local storage if Cloudinary fails
           const uploadPath = process.env.UPLOAD_PATH || "./uploads";
           await fs.mkdir(uploadPath, { recursive: true });
+          const filename = `ai-${Date.now()}-${index}.${mime.getExtension(mimeType)}`;
           const filePath = path.join(uploadPath, filename);
           await fs.writeFile(filePath, buffer);
           
@@ -179,6 +241,24 @@ export const generateImageWithGoogleAI = async (
 
     if (!variants.length) {
       throw new Error("No image returned from Gemini");
+    }
+
+    // Store chat context in Mem0 if userId is provided
+    if (options.userId) {
+      try {
+        await mem0Service.storeChatContext(
+          options.userId,
+          prompt,
+          `Generated ${category} thumbnail: ${variants[0].url}`,
+          {
+            category: category,
+            image_url: variants[0].url,
+            is_refinement: isRefinement
+          }
+        );
+      } catch (memError) {
+        console.warn("⚠️ Failed to store chat context in Mem0:", memError.message);
+      }
     }
 
     return {

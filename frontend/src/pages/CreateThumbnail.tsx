@@ -11,9 +11,12 @@ import {
   Heart,
 } from "lucide-react";
 import { useAuthStore } from "../stores/authStore";
+import { useReferenceImages, useImageActions, useImageUI, useImageStore } from "../stores/imageStore";
 import { thumbnailsAPI } from "../services/api";
 import toast from "react-hot-toast";
 import { motion, AnimatePresence } from "framer-motion";
+import { ImageUpload } from "../components/ImageUpload";
+import ImageGallery from "../components/ImageGallery";
 
 interface ChatMessage {
   id: string;
@@ -43,11 +46,15 @@ interface Thumbnail {
 
 const CreateThumbnail = () => {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user, token } = useAuthStore();
+  
+  // Zustand store
+  const referenceImages = useReferenceImages();
+  const { addGeneratedImage, markAsLatest, getLatestGeneratedImage, addRefinedImage } = useImageActions();
+  const { isGenerating, setGenerating } = useImageUI();
+  
   const [isLoading, setIsLoading] = useState(false);
-  const [uploadedImage, setUploadedImage] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string>("");
-  const [uploadedImagePath, setUploadedImagePath] = useState<string>("");
+  const [uploadedImagePaths, setUploadedImagePaths] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(
     null
   );
@@ -112,10 +119,8 @@ const CreateThumbnail = () => {
         const response = await thumbnailsAPI.uploadReference(file);
         const { imageUrl, relativePath } = response.data.data;
 
-        setUploadedImage(file);
-        setPreviewUrl(imageUrl);
-        // Store the relative path for sending to Gemini API
-        setUploadedImagePath(relativePath);
+      // Store the relative path for sending to Gemini API
+      setUploadedImagePaths([relativePath]);
         
         console.log("🔍 DEBUG: Image upload completed!");
         console.log("🔍 DEBUG: relativePath:", relativePath);
@@ -162,6 +167,10 @@ const CreateThumbnail = () => {
       toast.error("Please select a category first");
       return;
     }
+    if (uploadedImagePaths.length === 0) {
+      toast.error("Please upload at least one reference image");
+      return;
+    }
 
     // If there's already a generated image, use refine instead of create
     if (currentGeneratedImage && currentThumbnail) {
@@ -188,29 +197,65 @@ const CreateThumbnail = () => {
       setIsLoading(true);
       
       console.log("🔍 DEBUG: About to send request with:");
-      console.log("🔍 DEBUG: uploadedImagePath:", uploadedImagePath);
-      console.log("🔍 DEBUG: typeof uploadedImagePath:", typeof uploadedImagePath);
+      console.log("🔍 DEBUG: uploadedImagePaths:", uploadedImagePaths);
       console.log("🔍 DEBUG: currentPrompt:", currentPrompt);
       
-      const requestData = {
-        title: `AI Thumbnail - ${Date.now()}`,
-        category: selectedCategory.id,
-        originalPrompt: currentPrompt,
-        referenceImage: uploadedImagePath || undefined, // Only send if image exists
-      };
-      
-      console.log("🔍 DEBUG: Final requestData:", requestData);
-      
-      const response = await thumbnailsAPI.create(requestData);
+      // Use the new image generation API
+      const response = await fetch('http://localhost:5001/api/images/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token || ''}`
+        },
+        body: JSON.stringify({
+          prompt: currentPrompt,
+          category: selectedCategory.id,
+          referenceImages: uploadedImagePaths,
+          userId: user?.id || 'anonymous'
+        })
+      });
 
-      const { thumbnail } = response.data.data;
+      if (!response.ok) {
+        throw new Error(`Generation failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
       setChatMessages((prev) => prev.filter((msg) => !msg.isGenerating));
-      setCurrentThumbnail(thumbnail);
-      setCurrentGeneratedImage(thumbnail.imageUrl);
+      
+      // Update state with generated image
+      setCurrentGeneratedImage(result.imageUrl);
+      setCurrentThumbnail({
+        id: `gen_${Date.now()}`,
+        imageUrl: result.imageUrl,
+        finalPrompt: currentPrompt,
+        category: selectedCategory.id,
+        status: 'completed'
+      });
 
-      addMessage("ai", `✨ Thumbnail generated!`, thumbnail.imageUrl);
+      // Add generated image to store
+      const generatedImage = {
+        id: `gen_${Date.now()}`,
+        fileName: `generated_${Date.now()}.png`,
+        imageUrl: result.imageUrl,
+        generatedAt: new Date().toISOString(),
+        prompt: currentPrompt,
+        referenceImageIds: referenceImages.map(img => img.id),
+        isLatest: true,
+        publicId: result.variants[0]?.publicId,
+        metadata: {
+          width: 1280,
+          height: 720,
+          size: 0, // Will be updated when we get actual size
+        }
+      };
+
+      addGeneratedImage(generatedImage);
+      markAsLatest(generatedImage.id);
+
+      addMessage("ai", `✨ Thumbnail generated!`);
       toast.success("Thumbnail generated successfully!");
-    } catch {
+    } catch (error) {
+      console.error("Generation error:", error);
       toast.error("Failed to generate thumbnail");
       setChatMessages((prev) => prev.filter((msg) => !msg.isGenerating));
     } finally {
@@ -234,23 +279,59 @@ const CreateThumbnail = () => {
     try {
       setIsLoading(true);
       
-      const response = await thumbnailsAPI.edit(currentThumbnail.id, {
-        userPrompt: refinementPrompt,
-        chatHistory: chatMessages.map(msg => ({
-          role: msg.type === 'user' ? 'user' : 'assistant',
-          content: msg.content
-        }))
+      // Use the new image refinement API
+      const response = await fetch('http://localhost:5001/api/images/refine', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token || ''}`
+        },
+        body: JSON.stringify({
+          prompt: refinementPrompt,
+          baseImageId: currentThumbnail.id,
+          category: selectedCategory?.id || 'other',
+          userId: user?.id || 'anonymous'
+        })
       });
-      
-      const { thumbnail } = response.data.data;
-      setChatMessages((prev) => prev.filter((msg) => !msg.isGenerating));
-      setCurrentGeneratedImage(thumbnail.imageUrl);
-      setCurrentThumbnail(thumbnail);
 
-      addMessage("ai", `🎯 Thumbnail refined!`, thumbnail.imageUrl);
+      if (!response.ok) {
+        throw new Error(`Refinement failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setChatMessages((prev) => prev.filter((msg) => !msg.isGenerating));
+      
+      // Update state with refined image
+      setCurrentGeneratedImage(result.imageUrl);
+      setCurrentThumbnail({
+        ...currentThumbnail,
+        imageUrl: result.imageUrl,
+        finalPrompt: refinementPrompt
+      });
+
+      // Add refined image to store
+      const refinedImage = {
+        id: `refined_${Date.now()}`,
+        fileName: `refined_${Date.now()}.png`,
+        imageUrl: result.imageUrl,
+        refinedAt: new Date().toISOString(),
+        baseImageId: getLatestGeneratedImage()?.id || '',
+        refinementPrompt: refinementPrompt,
+        publicId: result.variants[0]?.publicId,
+        metadata: {
+          width: 1280,
+          height: 720,
+          size: 0, // Will be updated when we get actual size
+        }
+      };
+
+      addRefinedImage(refinedImage);
+
+      addMessage("ai", `🎯 Thumbnail refined!`);
       toast.success("Thumbnail refined successfully!");
     } catch (error: any) {
-      toast.error(error.response?.data?.error || "Failed to refine thumbnail");
+      console.error("Refinement error:", error);
+      toast.error(error.message || "Failed to refine thumbnail");
       setChatMessages((prev) => prev.filter((msg) => !msg.isGenerating));
     } finally {
       setIsLoading(false);
@@ -264,12 +345,8 @@ const CreateThumbnail = () => {
     }
 
     try {
-      // Convert relative URL to absolute URL if needed
-      let imageUrl = currentGeneratedImage;
-      if (imageUrl.startsWith('/')) {
-        // If it's a relative path, make it absolute
-        imageUrl = `${window.location.origin}${imageUrl}`;
-      }
+      // Cloudinary URLs are already absolute, no need to convert
+      const imageUrl = currentGeneratedImage;
 
       // Fetch the image as a blob
       const response = await fetch(imageUrl);
@@ -308,12 +385,8 @@ const CreateThumbnail = () => {
     }
 
     try {
-      // Convert relative URL to absolute URL if needed
-      let url = imageUrl;
-      if (url.startsWith('/')) {
-        // If it's a relative path, make it absolute
-        url = `${window.location.origin}${url}`;
-      }
+      // Cloudinary URLs are already absolute, no need to convert
+      const url = imageUrl;
 
       // Fetch the image as a blob
       const response = await fetch(url);
@@ -362,15 +435,17 @@ const CreateThumbnail = () => {
 
   const handleNewSession = () => {
     setChatMessages([]);
-    setUploadedImage(null);
-    setPreviewUrl("");
-    setUploadedImagePath("");
+    setUploadedImagePaths([]);
     setSelectedCategory(null);
     setCurrentGeneratedImage("");
     setCurrentThumbnail(null);
     setIsSessionActive(true); // Keep session active for new sessions
     setPrompt("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    
+    // Clear Zustand store
+    const { clearCurrentSession } = useImageStore.getState();
+    clearCurrentSession();
+    
     toast.success("New session started!");
   };
 
@@ -398,29 +473,6 @@ const CreateThumbnail = () => {
             </h1>
           </div>
           <div className="flex items-center space-x-3">
-            {currentGeneratedImage && (
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={handleDownload}
-                  className="btn btn-primary btn-sm"
-                >
-                  <Download className="w-4 h-4 mr-2" /> Download
-                </button>
-                <button
-                  onClick={() => handleLike(currentThumbnail?.id)}
-                  className={`btn btn-sm ${
-                    currentThumbnail?.isLiked 
-                      ? 'btn-primary' 
-                      : 'btn-outline'
-                  }`}
-                >
-                  <Heart className={`w-4 h-4 mr-2 ${
-                    currentThumbnail?.isLiked ? 'fill-current' : ''
-                  }`} /> 
-                  {currentThumbnail?.isLiked ? 'Liked' : 'Like'}
-                </button>
-              </div>
-            )}
             <button
               onClick={handleNewSession}
               className="btn btn-outline btn-sm"
@@ -448,40 +500,16 @@ const CreateThumbnail = () => {
         <div className="space-y-6">
           {/* Upload */}
           <div className="card p-6">
-            <h3 className="font-semibold mb-4">📸 Upload Reference</h3>
-            {!previewUrl ? (
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary-500 dark:hover:border-primary-400 transition"
-              >
-                <Upload className="w-10 h-10 text-gray-400 mx-auto mb-3" />
-                <p className="text-gray-500 text-sm">PNG, JPG up to 10MB</p>
-              </div>
-            ) : (
-              <div className="relative">
-                <img
-                  src={previewUrl}
-                  alt="Uploaded reference"
-                  className="w-full h-48 object-cover rounded-lg"
-                />
-                <button
-                  onClick={() => {
-                    setUploadedImage(null);
-                    setPreviewUrl("");
-                    if (fileInputRef.current) fileInputRef.current.value = "";
-                  }}
-                  className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleImageUpload}
-              className="hidden"
+            <h3 className="font-semibold mb-4">📸 Upload Reference Images</h3>
+            <ImageUpload
+              onImagesChange={(images) => {
+                // Update the image paths for API calls
+                setUploadedImagePaths(images.map(img => img.split('/').pop() || ''));
+              }}
+              onImagePathsChange={setUploadedImagePaths}
+              maxImages={5}
+              showTextInput={false}
+              showGallery={true}
             />
           </div>
 
@@ -514,8 +542,67 @@ const CreateThumbnail = () => {
           </div>
         </div>
 
+        {/* Center Preview Panel */}
+        <div className="space-y-6">
+          <div className="card p-6">
+            <h3 className="font-semibold mb-4">🎨 Generated Thumbnail</h3>
+            {currentGeneratedImage ? (
+              <div className="relative group">
+                <img
+                  src={currentGeneratedImage}
+                  alt="Generated thumbnail"
+                  className="w-full rounded-lg border shadow-lg"
+                />
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={handleDownload}
+                    className="bg-black/70 hover:bg-black/90 text-white p-2 rounded-full shadow-lg transition-all"
+                    title="Download image"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handleLike(currentThumbnail?.id)}
+                      className={`btn btn-sm ${
+                        currentThumbnail?.isLiked 
+                          ? 'btn-primary' 
+                          : 'btn-outline'
+                      }`}
+                    >
+                      <Heart className={`w-4 h-4 mr-2 ${
+                        currentThumbnail?.isLiked ? 'fill-current' : ''
+                      }`} /> 
+                      {currentThumbnail?.isLiked ? 'Liked' : 'Like'}
+                    </button>
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {currentThumbnail?.category && (
+                      <span className="capitalize">{currentThumbnail.category}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <MessageSquare className="w-8 h-8 text-gray-400" />
+                </div>
+                <h4 className="font-medium text-gray-900 dark:text-white mb-2">
+                  No thumbnail generated yet
+                </h4>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Upload images, select a category, and describe your idea to generate a thumbnail.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Chat Panel */}
-        <div className="lg:col-span-2 card min-h-[600px] max-h-[80vh] flex flex-col">
+        <div className="card min-h-[600px] max-h-[80vh] flex flex-col">
           <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db #f3f4f6' }}>
             <AnimatePresence>
               {chatMessages.length === 0 ? (
@@ -548,25 +635,6 @@ const CreateThumbnail = () => {
                           : "bg-white dark:bg-gray-800 border text-gray-900 dark:text-white"
                       }`}
                     >
-                      {msg.imageUrl && (
-                        <div className="mb-2 relative group">
-                          <img
-                            src={msg.imageUrl}
-                            alt="Generated"
-                            className="w-full rounded-lg border"
-                          />
-                          {/* Download button overlay */}
-                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => msg.imageUrl && downloadImage(msg.imageUrl)}
-                              className="bg-black/70 hover:bg-black/90 text-white p-2 rounded-full shadow-lg transition-all"
-                              title="Download image"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
                       <div
                         dangerouslySetInnerHTML={{
                           __html: msg.content,
@@ -591,11 +659,11 @@ const CreateThumbnail = () => {
           {/* Input */}
           <div className="p-4 border-t">
             {/* Status indicator */}
-            {uploadedImagePath && (
+            {uploadedImagePaths.length > 0 && (
               <div className="mb-3 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
                 <div className="flex items-center text-sm text-green-700 dark:text-green-300">
                   <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
-                  📸 Reference image uploaded: {uploadedImagePath.split('/').pop()}
+                  📸 {uploadedImagePaths.length} reference image{uploadedImagePaths.length > 1 ? 's' : ''} uploaded
                 </div>
               </div>
             )}
